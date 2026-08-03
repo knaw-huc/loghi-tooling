@@ -1,92 +1,65 @@
 package nl.knaw.huc.di.images.altoxmlutils;
 
 import nl.knaw.huc.di.images.layoutds.models.Alto.AltoDocument;
+import nl.knaw.huc.di.images.layoutds.models.Alto.MeasurementUnit;
+import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
-import static org.junit.Assert.*;
-
-/**
- * TEST-01 baseline coverage for {@link AltoUtils}.
- * <p>
- * These tests are intentionally lightweight — they exercise the public entry point of
- * AltoUtils with hand-crafted ALTO fragments and unknown-element fallbacks. The internal
- * conversion helpers are exercised indirectly.
- */
 public class AltoUtilsTest {
 
-    private static final String MINIMAL_ALTO =
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-                    "<alto xmlns=\"http://www.loc.gov/standards/alto/ns-v3#\">" +
-                    "  <Description>" +
-                    "    <MeasurementUnit>pixel</MeasurementUnit>" +
-                    "  </Description>" +
-                    "  <Layout>" +
-                    "    <Page ID=\"PAGE1\" PHYSICAL_IMG_NR=\"1\" HEIGHT=\"100\" WIDTH=\"200\"/>" +
-                    "  </Layout>" +
-                    "</alto>";
+    private static final String ALTO =
+            "<alto>" +
+            "  <Description>" +
+            "    <MeasurementUnit>inch</MeasurementUnit>" +
+            "    <sourceImageInformation><fileName>test.jpg</fileName></sourceImageInformation>" +
+            "  </Description>" +
+            "  <Layout>" +
+            "    <Page ID=\"page1\" HEIGHT=\"100\" WIDTH=\"200\">" +
+            "      <PrintSpace ID=\"ps1\" HPOS=\"0\" VPOS=\"0\" WIDTH=\"200\" HEIGHT=\"100\">" +
+            "        <TextBlock ID=\"block1\" HPOS=\"1\" VPOS=\"2\" WIDTH=\"50\" HEIGHT=\"10\">" +
+            "          <TextLine ID=\"line1\" HPOS=\"1\" VPOS=\"2\" WIDTH=\"50\" HEIGHT=\"10\">" +
+            "            <String ID=\"s1\" CONTENT=\"Hello\" WC=\"0.9\" HPOS=\"1\" VPOS=\"2\" WIDTH=\"20\" HEIGHT=\"10\"/>" +
+            "          </TextLine>" +
+            "        </TextBlock>" +
+            "      </PrintSpace>" +
+            "    </Page>" +
+            "  </Layout>" +
+            "</alto>";
 
-    @Test
-    public void readMinimalAlto_returnsNonNullDocument() {
-        AltoDocument doc = AltoUtils.readAltoDocumentFromString(MINIMAL_ALTO);
-        assertNotNull("Parsing a minimal ALTO document should yield a non-null result", doc);
-        assertNotNull("Description must be parsed", doc.getDescription());
-        assertNotNull("Layout must be parsed", doc.getLayout());
+    private AltoDocument document;
+
+    @Before
+    public void setUp() {
+        document = AltoUtils.readAltoDocumentFromString(ALTO);
     }
 
-    @Test
-    public void readMalformedAlto_returnsNull() {
-        // convertStringToXMLDocument returns null on parse error; AltoUtils must propagate.
-        AltoDocument doc = AltoUtils.readAltoDocumentFromString("<not-valid-xml>");
-        assertNull(doc);
+    @Test public void invalidXmlReturnsNull() {
+        Assert.assertNull(AltoUtils.readAltoDocumentFromString("this is not xml <<"));
     }
-
-    @Test
-    public void readEmptyString_returnsNull() {
-        AltoDocument doc = AltoUtils.readAltoDocumentFromString("");
-        assertNull(doc);
+    @Test public void validXmlIsParsed() {
+        Assert.assertNotNull(document);
     }
-
-    @Test
-    public void readAltoWithUnknownTopLevelElement_doesNotThrow() {
-        String alto =
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-                        "<alto xmlns=\"http://www.loc.gov/standards/alto/ns-v3#\">" +
-                        "  <CompletelyUnknownThing/>" +
-                        "</alto>";
-        AltoDocument doc = AltoUtils.readAltoDocumentFromString(alto);
-        // Unknown elements must be tolerated (a WARN is logged) so the public API stays robust.
-        assertNotNull(doc);
+    @Test public void measurementUnitIsInch() {
+        Assert.assertEquals(MeasurementUnit.inch, document.getDescription().getMeasurementUnit());
     }
-
-    @Test
-    public void readAltoWithLayoutAndPrintSpace_succeeds() {
-        String alto =
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
-                        "<alto xmlns=\"http://www.loc.gov/standards/alto/ns-v3#\">" +
-                        "  <Layout>" +
-                        "    <Page ID=\"PAGE1\" PHYSICAL_IMG_NR=\"1\" HEIGHT=\"100\" WIDTH=\"200\">" +
-                        "      <PrintSpace HEIGHT=\"80\" WIDTH=\"180\" VPOS=\"10\" HPOS=\"10\"/>" +
-                        "    </Page>" +
-                        "  </Layout>" +
-                        "</alto>";
-        AltoDocument doc = AltoUtils.readAltoDocumentFromString(alto);
-        assertNotNull(doc);
-        assertNotNull(doc.getLayout());
-        assertNotNull(doc.getLayout().getPage());
+    @Test public void sourceImageFileName() {
+        Assert.assertEquals("test.jpg",
+                document.getDescription().getSourceImageInformation().getFileName());
     }
-
-    @Test
-    public void readAltoIsStaticThreadSafe() throws Exception {
-        // Verify the public API can be called from multiple threads concurrently without
-        // races. AltoUtils only has static methods over per-call DOMs so this is a sanity
-        // check guarding against accidental shared mutable state.
-        Thread t1 = new Thread(() -> assertNotNull(AltoUtils.readAltoDocumentFromString(MINIMAL_ALTO)));
-        Thread t2 = new Thread(() -> assertNotNull(AltoUtils.readAltoDocumentFromString(MINIMAL_ALTO)));
-        t1.start();
-        t2.start();
-        t1.join(5_000);
-        t2.join(5_000);
-        assertTrue(!t1.isAlive() && !t2.isAlive());
+    @Test public void pageDimensions() {
+        Assert.assertEquals(Integer.valueOf(100), document.getLayout().getPage().getHeight());
+        Assert.assertEquals(Integer.valueOf(200), document.getLayout().getPage().getWidth());
+    }
+    @Test public void pageId() {
+        Assert.assertEquals("page1", document.getLayout().getPage().getId());
+    }
+    @Test public void printSpaceWidthAndOneBlock() {
+        Assert.assertEquals(200, document.getLayout().getPage().getPrintSpace().getWidth());
+        Assert.assertEquals(1, document.getLayout().getPage().getPrintSpace().getPrintSpaceBlocks().size());
+    }
+    @Test public void textBlockHasOneTextLine() {
+        Assert.assertEquals(1, document.getLayout().getPage().getPrintSpace()
+                .getPrintSpaceBlocks().get(0).getTextLines().size());
     }
 }
-
