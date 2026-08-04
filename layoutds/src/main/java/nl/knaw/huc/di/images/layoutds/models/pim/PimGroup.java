@@ -1,8 +1,11 @@
 package nl.knaw.huc.di.images.layoutds.models.pim;
 
+
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.hibernate.annotations.Type;
 import org.hibernate.validator.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.*;
 import javax.xml.bind.annotation.XmlRootElement;
@@ -12,6 +15,7 @@ import java.util.stream.Collectors;
 @Entity
 @XmlRootElement
 public class PimGroup implements IPimObject {
+    private static final Logger LOG = LoggerFactory.getLogger(PimGroup.class);
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -225,7 +229,7 @@ public class PimGroup implements IPimObject {
 
     public void removeMembership(Membership membership) {
         final boolean remove = memberships.remove(membership);
-        System.out.println("removed: " + remove);
+        LOG.info("removed: {}", remove);
     }
 
     public void addSupergroup(PimGroup superGroup) {

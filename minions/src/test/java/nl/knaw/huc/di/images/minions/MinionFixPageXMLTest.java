@@ -18,8 +18,8 @@ class MinionFixPageXMLTest {
 
     private final String sampleXml2013 = "<PcGts xmlns=\"http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15\">" +
             "<Page>" +
-            "<TextRegion>" +
-            "<TextLine>" +
+            "<TextRegion id=\"region_1\">" +
+            "<TextLine id=\"line_1\">" +
             "<TextEquiv>Sample Text</TextEquiv>" +
             "<Word>Sample Word</Word>" +
             "</TextLine>" +
@@ -29,8 +29,8 @@ class MinionFixPageXMLTest {
 
     private final String sampleXml2019 = "<PcGts xmlns=\"http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15\">" +
             "<Page>" +
-            "<TextRegion>" +
-            "<TextLine>" +
+            "<TextRegion id=\"region_1\">" +
+            "<TextLine id=\"line_1\">" +
             "<TextEquiv>Sample Text</TextEquiv>" +
             "<Word>Sample Word</Word>" +
             "</TextLine>" +

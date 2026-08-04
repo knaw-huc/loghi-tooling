@@ -1,37 +1,22 @@
 package nl.knaw.huc.di.images.imageanalysiscommon;
 
-import com.ctc.wstx.stax.WstxInputFactory;
-import com.ctc.wstx.stax.WstxOutputFactory;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.dataformat.xml.XmlFactory;
-import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import com.google.common.base.Strings;
-import nl.knaw.huc.di.images.imageanalysiscommon.StringConverter;
-import nl.knaw.huc.di.images.layoutds.DAO.DocumentImageDAO;
-import nl.knaw.huc.di.images.layoutds.SessionFactorySingleton;
+import nl.knaw.huc.di.images.layoutds.models.Alto.*;
 import nl.knaw.huc.di.images.layoutds.models.Alto.Page;
 import nl.knaw.huc.di.images.layoutds.models.Alto.PrintSpace;
-import nl.knaw.huc.di.images.layoutds.models.Alto.Shape;
 import nl.knaw.huc.di.images.layoutds.models.Alto.TextLine;
-import nl.knaw.huc.di.images.layoutds.models.Alto.*;
 import nl.knaw.huc.di.images.layoutds.models.*;
 import nl.knaw.huc.di.images.layoutds.models.Page.*;
 import nl.knaw.huc.di.images.layoutds.models.hocr.*;
-import nl.knaw.huc.di.images.layoutds.models.iiif.IIIFTypes;
-//import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
-import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.io.FilenameUtils;
-import org.hibernate.Session;
-import org.joda.time.DateTime;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.*;
+import java.util.UUID;
 
 public class DocumentTypeConverter {
 
@@ -173,7 +158,11 @@ public class DocumentTypeConverter {
     }
 
     private static Rect getBoundingBox(TextRegion textRegion) {
-        ArrayList<Point> points = StringConverter.stringToPoint(textRegion.getCoords().getPoints());
+        return getBoundingBox(textRegion.getCoords().getPoints());
+    }
+
+    private static Rect getBoundingBox(String coordPoints) {
+        ArrayList<Point> points = StringConverter.stringToPoint(coordPoints);
         int xMin = Integer.MAX_VALUE;
         int xMax = Integer.MIN_VALUE;
         int yMin = Integer.MAX_VALUE;
@@ -196,49 +185,11 @@ public class DocumentTypeConverter {
     }
 
     private static Rect getBoundingBox(nl.knaw.huc.di.images.layoutds.models.Page.TextLine textLine){
-        ArrayList<Point> points = StringConverter.stringToPoint(textLine.getCoords().getPoints());
-        int xMin = Integer.MAX_VALUE;
-        int xMax = Integer.MIN_VALUE;
-        int yMin = Integer.MAX_VALUE;
-        int yMax = Integer.MIN_VALUE;
-        for (Point point : points) {
-            if (point.x < xMin) {
-                xMin = (int) point.x;
-            }
-            if (point.x > xMax) {
-                xMax = (int) point.x;
-            }
-            if (point.y < yMin) {
-                yMin = (int) point.y;
-            }
-            if (point.y > yMax) {
-                yMax = (int) point.y;
-            }
-        }
-        return new Rect(xMin, yMin, xMax - xMin, yMax - yMin);
+        return getBoundingBox(textLine.getCoords().getPoints());
     }
 
     private static Rect getBoundingBox(Word word){
-        ArrayList<Point> points = StringConverter.stringToPoint(word.getCoords().getPoints());
-        int xMin = Integer.MAX_VALUE;
-        int xMax = Integer.MIN_VALUE;
-        int yMin = Integer.MAX_VALUE;
-        int yMax = Integer.MIN_VALUE;
-        for (Point point : points) {
-            if (point.x < xMin) {
-                xMin = (int) point.x;
-            }
-            if (point.x > xMax) {
-                xMax = (int) point.x;
-            }
-            if (point.y < yMin) {
-                yMin = (int) point.y;
-            }
-            if (point.y > yMax) {
-                yMax = (int) point.y;
-            }
-        }
-        return new Rect(xMin, yMin, xMax - xMin, yMax - yMin);
+        return getBoundingBox(word.getCoords().getPoints());
     }
 
 

@@ -12,6 +12,8 @@ import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import org.opencv.core.*;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -19,6 +21,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class MergeBaseLines {
+    private static final Logger LOG = LoggerFactory.getLogger(MergeBaseLines.class);
 
     static {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
@@ -33,7 +36,11 @@ public class MergeBaseLines {
             // Oude page omzetten naar image met ingetekende lijnen
             // p2pala output omzetten naar page en dan één voor één de lijnen intekenen
             final String p2palaOutput = "/home/stefan/Downloads/NL-0400410000_26_009006_000312.png";
-            Mat baseLineMat = Imgcodecs.imread(p2palaOutput, Imgcodecs.IMREAD_GRAYSCALE);
+            Mat baseLineMat = OpenCVWrapper.imread(p2palaOutput, Imgcodecs.IMREAD_GRAYSCALE);
+            if (baseLineMat.empty()) {
+                baseLineMat = OpenCVWrapper.release(baseLineMat);
+                throw new IOException("Could not read baseline image: " + p2palaOutput);
+            }
             Mat thresHoldedBaselines = OpenCVWrapper.newMat(baseLineMat.size(), CvType.CV_8UC1);
             Imgproc.threshold(baseLineMat, thresHoldedBaselines, 0, 255, Imgproc.THRESH_BINARY);
             Mat stats = new Mat();
@@ -55,45 +62,24 @@ public class MergeBaseLines {
 
             int i = 0;
             for (TextLine newTextLine : newTextLines) {
-//                Mat newLineImage = new Mat(baseLineMat.size(), CvType.CV_8UC1, Scalar.all(0));
-                Mat newLineImage = Mat.zeros(baseLineMat.size(), CvType.CV_8UC1);
+                Mat newLineImage = OpenCVWrapper.zeros(baseLineMat.size(), CvType.CV_8UC1);
 
                 writeBaseLineToMat(newLineImage, newTextLine.getBaseline());
-                final Mat scaledNewLineImage = new Mat();
-//                Imgproc.resize(newLineImage, scaledNewLineImage, scaledSize, 0, 0, Imgproc.INTER_AREA);
                 Imgcodecs.imwrite("/tmp/output/" + i + "_" + newTextLine.getId() + ".png", newLineImage);
                 i++;
 
                 for (TextLine oldLine : oldLines) {
-                    Mat oldLineImage = new Mat(baseLineMat.size(), CvType.CV_8UC1);
-//                    writeBaseLineToMat(oldLineImage, oldLine.getBaseline());
+                    Mat oldLineImage = OpenCVWrapper.newMat(baseLineMat.size(), CvType.CV_8UC1);
+                    try {
+                        final double intersectOverUnion = LayoutProc.intersectOverUnion(newLineImage, oldLineImage);
 
 
-//                    final Mat intersection = new Mat();
-//                    Core.bitwise_and(newLineImage, oldLineImage, intersection);
-//                    final Mat union = new Mat();
-//                    Core.bitwise_or(newLineImage, oldLineImage, union);
-//                    final Mat iou = new Mat();
-//                    Core.divide(intersection, union, iou);
-//                    long baseLineIntersection = getCountBaseLinePixels(intersection);
-//                    long baseLineUnion = getCountBaseLinePixels(union);
-//                    final double intersectOverUnion = (double) baseLineIntersection / (double) baseLineUnion;
-
-                    final double intersectOverUnion = LayoutProc.intersectOverUnion(newLineImage, oldLineImage);
-
-
-                    if (intersectOverUnion > 0.50) {
-                        idMapping.put(newTextLine.getId(), oldLine.getId());
-//                        System.out.println("newLine: " + newTextLine.getId());
-//                        System.out.println("oldLine: " + oldLine.getId());
-//                        System.out.println("intersection over union: " + interSectionOverUnion);
+                        if (intersectOverUnion > 0.50) {
+                            idMapping.put(newTextLine.getId(), oldLine.getId());
+                        }
+                    } finally {
+                        oldLineImage = OpenCVWrapper.release(oldLineImage);
                     }
-
-                    oldLineImage = OpenCVWrapper.release(oldLineImage);
-//                    intersection.release();
-//                    union.release();
-//                    iou.release();
-
                 }
                 newLineImage = OpenCVWrapper.release(newLineImage);
             }
@@ -104,15 +90,14 @@ public class MergeBaseLines {
             labeled =OpenCVWrapper.release(labeled);
 
 
-            System.out.println(idMapping);
-            System.out.println(idMapping.values());
-            System.out.println(idMapping.values().size());
-            System.out.println(started.stop());
+            LOG.info("{}", idMapping);
+            LOG.info("{}", idMapping.values());
+            LOG.info("{}", idMapping.values().size());
+            LOG.info("{}", started.stop());
 //            System.out.println(idMapping.keySet().size());
 
         } catch (Exception e) {
-            System.err.println(e.getMessage());
-            e.printStackTrace();
+            LOG.error("Error while merging baselines", e);
         }
     }
 
@@ -180,24 +165,28 @@ public class MergeBaseLines {
         for (int label = 1; label < numLabels; label++) {
             Rect rect = LayoutProc.getRectFromStats(stats, label);
             Mat submat = labeled.submat(rect);
-            List<Point> baselinePoints = extractBaseline(submat, label, new Point(rect.x, rect.y), minimumHeight, identifier);
-            if (baselinePoints.size() < 2) {
-                continue;
+            try {
+                List<Point> baselinePoints = extractBaseline(submat, label, new Point(rect.x, rect.y), minimumHeight, identifier);
+                if (baselinePoints.size() < 2) {
+                    continue;
+                }
+                TextLine textLine = new TextLine();
+                Coords coords = new Coords();
+                List<Point> coordPoints = new ArrayList<>();
+                coordPoints.add(new Point(rect.x, rect.y));
+                coordPoints.add(new Point(rect.x + rect.width - 1, rect.y));
+                coordPoints.add(new Point(rect.x + rect.width - 1, rect.y + rect.height - 1));
+                coordPoints.add(new Point(rect.x, rect.y + rect.height - 1));
+                coords.setPoints(StringConverter.pointToString(coordPoints));
+                textLine.setCoords(coords);
+                Baseline baseline = new Baseline();
+                baseline.setPoints(StringConverter.pointToString(baselinePoints));
+                textLine.setBaseline(baseline);
+                textLine.setId(UUID.randomUUID().toString());
+                textLines.add(textLine);
+            } finally {
+                submat = OpenCVWrapper.release(submat);
             }
-            TextLine textLine = new TextLine();
-            Coords coords = new Coords();
-            List<Point> coordPoints = new ArrayList<>();
-            coordPoints.add(new Point(rect.x, rect.y));
-            coordPoints.add(new Point(rect.x + rect.width-1, rect.y));
-            coordPoints.add(new Point(rect.x + rect.width-1, rect.y + rect.height-1));
-            coordPoints.add(new Point(rect.x, rect.y + rect.height-1));
-            coords.setPoints(StringConverter.pointToString(coordPoints));
-            textLine.setCoords(coords);
-            Baseline baseline = new Baseline();
-            baseline.setPoints(StringConverter.pointToString(baselinePoints));
-            textLine.setBaseline(baseline);
-            textLine.setId(UUID.randomUUID().toString());
-            textLines.add(textLine);
         }
         return textLines;
     }
@@ -243,7 +232,7 @@ public class MergeBaseLines {
             baseline.add(point);
         }
         if (mergedLineDetected) {
-            System.out.println("lines detected for: " + imageFile);
+            LOG.info("lines detected for: {}", imageFile);
         }
         return baseline;
     }

@@ -1,10 +1,13 @@
 package nl.knaw.huc.di.images.imageanalysiscommon;
 
+
 import com.drew.imaging.ImageMetadataReader;
 import com.drew.imaging.ImageProcessingException;
 import com.drew.metadata.Directory;
 import com.drew.metadata.Metadata;
 import com.drew.metadata.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,6 +15,7 @@ import java.io.IOException;
 public class ImageMetaDataReader {
 
 
+    private static final Logger LOG = LoggerFactory.getLogger(ImageMetaDataReader.class);
     public static void main(String[] args) throws ImageProcessingException, IOException {
         readMetaData();
     }
@@ -26,9 +30,9 @@ public class ImageMetaDataReader {
             for (Tag tag : directory.getTags()) {
                 String tagName = tag.getTagName();
                 String desc = tag.getDescription();
-                System.out.println(tagName);
-                System.out.println(desc);
-                System.out.println();
+                LOG.info("{}", tagName);
+                LOG.info("{}", desc);
+                LOG.info("");
                 switch (tagName) {
                     case "Date/Time Original":
                         createDate = desc.split(" ")[0].replace(":", "-");

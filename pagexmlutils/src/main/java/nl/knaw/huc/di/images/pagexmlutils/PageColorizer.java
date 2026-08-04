@@ -13,6 +13,8 @@ import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,6 +23,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class PageColorizer {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PageColorizer.class);
+    /**
+     * Shared, thread-safe {@link XmlMapper}. Re-using one instance avoids the
+     * reflective per-call initialisation cost (SMELL-06).
+     */
+    private static final XmlMapper XML_MAPPER = new XmlMapper();
     static {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
     }
@@ -163,7 +172,7 @@ public class PageColorizer {
                 }
             }
         } catch (AccessDeniedException adx) {
-            System.err.println("access denied: " + path.toAbsolutePath().toString());
+            LOG.warn("access denied: {}", path.toAbsolutePath(), adx);
         }
         return images;
     }
@@ -180,7 +189,7 @@ public class PageColorizer {
                 }
             }
         } catch (AccessDeniedException adx) {
-            System.err.println("access denied: " + path.toAbsolutePath().toString());
+            LOG.warn("access denied: {}", path.toAbsolutePath(), adx);
         }
         return xmls;
     }
@@ -199,21 +208,27 @@ public class PageColorizer {
                 continue;
             }
             Mat input = Imgcodecs.imread(imageFile);
-
-            XmlMapper mapper = new XmlMapper();
-            String pageXmlString = StringTools.readFile(xml.toAbsolutePath().toString());
-            PcGts page = null;
+            Mat result = null;
             try {
-                page = mapper.readValue(pageXmlString, PcGts.class);
-            } catch (Exception ex) {
+                String pageXmlString = StringTools.readFile(xml.toAbsolutePath().toString());
+                PcGts page;
+                try {
+                    page = XML_MAPPER.readValue(pageXmlString, PcGts.class);
+                } catch (Exception ex) {
+                    LOG.warn("Could not parse PAGE-XML {}", xml, ex);
+                    continue;
+                }
 
+                result = colorize(input, page);
+                Imgcodecs.imwrite("/tmp/colorized/" + FilenameUtils.removeExtension(xml.getFileName().toString()) + ".jpg", result);
+            } finally {
+                if (input != null) {
+                    input.release();
+                }
+                if (result != null) {
+                    result.release();
+                }
             }
-
-            Mat result = colorize(input, page);
-
-            Imgcodecs.imwrite("/tmp/colorized/"+FilenameUtils.removeExtension(xml.getFileName().toString()) + ".jpg", result);
-            input.release();
-            result.release();
         }
 //        String xmlFile = "/media/rutger/bf31fede-7650-4556-884c-2b0ed365db77/ijsberg/notarieel/NL-HlmNHA_1617_1665_0430.xml";
 //        String imageFile = "/media/rutger/bf31fede-7650-4556-884c-2b0ed365db77/ijsberg/notarieel/NL-HlmNHA_1617_1665_0430.jpg";

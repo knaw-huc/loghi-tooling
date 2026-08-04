@@ -10,8 +10,8 @@ import nl.knaw.huc.di.images.layoutds.models.Page.*;
 import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
-import org.opencv.core.Point;
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
@@ -28,12 +28,13 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.opencv.core.CvType.CV_8U;
-import static org.opencv.imgproc.Imgproc.*;
+import static org.opencv.imgproc.Imgproc.THRESH_BINARY;
+import static org.opencv.imgproc.Imgproc.THRESH_BINARY_INV;
 
 public class MinionGeneratePageImages implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(MinionGeneratePageImages.class);
@@ -88,9 +89,9 @@ public class MinionGeneratePageImages implements AutoCloseable {
                         ge.registerFont(font);
                         BufferedImage img = generateTextLine("bleet", new Color(255, 255, 255), new Color(0, 0, 0), 250, 250, new Font(font.getName(), Font.PLAIN, 40));
 
-                        Mat result = new Mat();
+                        Mat result = OpenCVWrapper.newMat();
                         Mat input = ImageConversionHelper.bufferedImageToMat(img);
-                        Mat grayImage = new Mat();
+                        Mat grayImage = OpenCVWrapper.newMat();
                         if (input.type() != CV_8U) {
                             Imgproc.cvtColor(input, grayImage, Imgproc.COLOR_BGR2GRAY);
                         } else {
@@ -101,7 +102,7 @@ public class MinionGeneratePageImages implements AutoCloseable {
 
                         fonts.add(font.getName());
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        LOG.error("Unexpected error", e);
                     }
                 }
             }
@@ -334,9 +335,9 @@ public class MinionGeneratePageImages implements AutoCloseable {
 
                         int textWidth = fm.stringWidth(" " + text + " ");
                         spaceWidth = fm.stringWidth(" ");
-                        System.out.println("textWidth = " + textWidth);
+                        LOG.warn("textWidth = {}", textWidth);
                         if (textWidth > maxTextWidth) {
-                            System.out.println("maxwidth = " + textWidth);
+                            LOG.warn("maxwidth = {}", textWidth);
                             maxTextWidth = textWidth;
                         }
                         int height = fm.getHeight();
@@ -530,7 +531,7 @@ public class MinionGeneratePageImages implements AutoCloseable {
             linecounter++;
             int stringWidth = fontMetrics.stringWidth(text);
             if (stringWidth < 1) {
-                System.err.println("stringwidth less than 1: " + stringWidth);
+                LOG.warn("stringwidth less than 1: {}", stringWidth);
                 continue;
             }
             graphics2D.drawString(text, spaceWidth, (int) (baselineY));
@@ -539,7 +540,7 @@ public class MinionGeneratePageImages implements AutoCloseable {
             final double maxLength = Math.min(text.length(), spaceWidth * charWidth);
             LOG.debug("maxLength: " + maxLength);
             if (maxLength< 1) {
-                System.err.println("maxLength less than 1: " + maxLength);
+                LOG.warn("maxLength less than 1: {}", maxLength);
                 continue;
             }
 

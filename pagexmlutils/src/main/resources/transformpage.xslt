@@ -24,8 +24,6 @@
     <xsl:template match="page:Page/@textLineOrder"/>
     <xsl:template match="page:TextRegion/@textLineOrder"/>
 
-    <xsl:template match="page:TextStyle/@xHeight"/>
-
     <xsl:template match="page:TextEquiv/@dataType"/>
 
     <xsl:template match="page:TextEquiv/@dataTypeDetails"/>

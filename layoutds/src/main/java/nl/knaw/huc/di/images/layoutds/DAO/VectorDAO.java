@@ -39,7 +39,6 @@ public class VectorDAO extends GenericDAO<Vector> {
             TypedQuery<Vector> query = session.createQuery(criteriaQuery);
             List<Vector> documentImages = query.getResultList();
 
-            session.close();
             if (documentImages.size() == 1) {
                 return documentImages.get(0);
             } else if (documentImages.size() > 1) {
@@ -114,7 +113,6 @@ public class VectorDAO extends GenericDAO<Vector> {
     }
 
     public Stream<Map<String, ?>> streamByModel(Session session, FindByModelQuery findByModelQuery, int limit, int skip) {
-        Stopwatch stopwatch = Stopwatch.createStarted();
         final Optional<Integer> modelIdOpt = getModelIdByName(session, findByModelQuery.model);
         if (modelIdOpt.isEmpty()) {
             return Stream.empty();
@@ -127,10 +125,15 @@ public class VectorDAO extends GenericDAO<Vector> {
                         "inner join pimrecord on pimrecord.parent=documentimage.remoteuri " +
                         "inner join pimfieldvalue on pimfieldvalue.pimrecordid=pimrecord.id " +
                         "inner join pimfield on pimfieldvalue.pimfieldid=pimfield.id " +
-                        "where documentimage.uuid='" + findByModelQuery.imageUuid + "' " +
-                        "and pimfield.name='" + findByModelQuery.pimField + "' " +
-                        (!Strings.isBlank(findByModelQuery.pimFieldValue) ? "and pimfieldValue.value='" + findByModelQuery.pimFieldValue + "' " : "") +
-                        ";");
+                        "where documentimage.uuid=:imageUuid " +
+                        "and pimfield.name=:pimField " +
+                        (!Strings.isBlank(findByModelQuery.pimFieldValue) ? "and pimfieldValue.value=:pimFieldValue " : "")
+                );
+                query.setParameter("imageUuid", findByModelQuery.imageUuid);
+                query.setParameter("pimField", findByModelQuery.pimField);
+                if (!Strings.isBlank(findByModelQuery.pimFieldValue)) {
+                    query.setParameter("pimFieldValue", findByModelQuery.pimFieldValue);
+                }
 
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
@@ -143,10 +146,15 @@ public class VectorDAO extends GenericDAO<Vector> {
                         "inner join pimrecord on pimrecord.parent=documentimage.remoteuri " +
                         "inner join pimfieldvalue on pimfieldvalue.pimrecordid=pimrecord.id " +
                         "inner join pimfield on pimfieldvalue.pimfieldid=pimfield.id " +
-                        "where dis.uuid='" + findByModelQuery.imageSetUuid + "' " +
-                        "and pimfield.name='" + findByModelQuery.pimField + "' " +
-                        (!Strings.isBlank(findByModelQuery.pimFieldValue) ? "and pimfieldValue.value='" + findByModelQuery.pimFieldValue + "' " : "") +
-                        ";");
+                        "where dis.uuid=:imageSetUuid " +
+                        "and pimfield.name=:pimField " +
+                        (!Strings.isBlank(findByModelQuery.pimFieldValue) ? "and pimfieldValue.value=:pimFieldValue " : "")
+                );
+                query.setParameter("imageSetUuid", findByModelQuery.imageSetUuid);
+                query.setParameter("pimField", findByModelQuery.pimField);
+                if (!Strings.isBlank(findByModelQuery.pimFieldValue)) {
+                    query.setParameter("pimFieldValue", findByModelQuery.pimFieldValue);
+                }
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
                     imageFilter = "and vectors.documentimageid in " + resultList;
@@ -157,9 +165,13 @@ public class VectorDAO extends GenericDAO<Vector> {
                         "inner join pimrecord on pimrecord.parent=documentimage.remoteuri " +
                         "inner join pimfieldvalue on pimfieldvalue.pimrecordid=pimrecord.id " +
                         "inner join pimfield on pimfieldvalue.pimfieldid=pimfield.id " +
-                        "and pimfield.name='" + findByModelQuery.pimField + "' " +
-                        (!Strings.isBlank(findByModelQuery.pimFieldValue) ? "and pimfieldValue.value='" + findByModelQuery.pimFieldValue + "' " : "") +
-                        ";");
+                        "and pimfield.name=:pimField " +
+                        (!Strings.isBlank(findByModelQuery.pimFieldValue) ? "and pimfieldValue.value=:pimFieldValue " : "")
+                );
+                query.setParameter("pimField", findByModelQuery.pimField);
+                if (!Strings.isBlank(findByModelQuery.pimFieldValue)) {
+                    query.setParameter("pimFieldValue", findByModelQuery.pimFieldValue);
+                }
 
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
@@ -169,14 +181,16 @@ public class VectorDAO extends GenericDAO<Vector> {
             }
         } else {
             if (findByModelQuery.imageUuid != null) {
-                final Query query = session.createNativeQuery("select id from documentimage where uuid='" + findByModelQuery.imageUuid + "';");
+                final Query query = session.createNativeQuery("select id from documentimage where uuid=:imageUuid");
+                query.setParameter("imageUuid", findByModelQuery.imageUuid);
 
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
                     imageFilter = "and vectors.documentimageid = " + resultList.get(0);
                 }
             } else if (findByModelQuery.imageSetUuid != null) {
-                final Query query = session.createNativeQuery("select dids.documentimageid from documentimageset dis inner join documentimagedataset dids on dids.documentimagesetid=dis.id where dis.uuid='" + findByModelQuery.imageSetUuid + "'");
+                final Query query = session.createNativeQuery("select dids.documentimageid from documentimageset dis inner join documentimagedataset dids on dids.documentimagesetid=dis.id where dis.uuid=:imageSetUuid");
+                query.setParameter("imageSetUuid", findByModelQuery.imageSetUuid);
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
                     imageFilter = "and vectors.documentimageid in " + resultList;
@@ -193,12 +207,13 @@ public class VectorDAO extends GenericDAO<Vector> {
                 "inner join documentocrresultline on vectors.documentocrresultline_id=documentocrresultline.id " +
                 "where vectormodel_id= " + vectorModelId + " " +
                 (!Strings.isBlank(imageFilter) ? imageFilter + " " : "") +
-                "limit " + limit + " " +
-                "offset " + skip + ";";
+                "order by vectors.id";
 
         LOG.info("find by model query: {}", queryString);
 
         final NativeQuery query = session.createNativeQuery(queryString);
+        query.setMaxResults(limit);
+        query.setFirstResult(skip);
 
         List<Object[]> rows = query.getResultList();
         return rows.stream().map(row -> {
@@ -231,10 +246,14 @@ public class VectorDAO extends GenericDAO<Vector> {
                         "inner join pimrecord on pimrecord.parent=documentimage.remoteuri " +
                         "inner join pimfieldvalue on pimfieldvalue.pimrecordid=pimrecord.id " +
                         "inner join pimfield on pimfieldvalue.pimfieldid=pimfield.id " +
-                        "where documentimage.uuid='" + siameseQuery.imageUuid + "' " +
-                        "and pimfield.name='" + siameseQuery.pimField + "' " +
-                        (!Strings.isBlank(siameseQuery.pimFieldValue) ? "and pimfieldValue.value='" + siameseQuery.pimFieldValue + "' " : "") +
-                        ";");
+                        "where documentimage.uuid=:imageUuid " +
+                        "and pimfield.name=:pimField " +
+                        (!Strings.isBlank(siameseQuery.pimFieldValue) ? "and pimfieldValue.value=:pimFieldValue " : ""));
+                query.setParameter("imageUuid", siameseQuery.imageUuid);
+                query.setParameter("pimField", siameseQuery.pimField);
+                if (!Strings.isBlank(siameseQuery.pimFieldValue)) {
+                    query.setParameter("pimFieldValue", siameseQuery.pimFieldValue);
+                }
 
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
@@ -247,11 +266,15 @@ public class VectorDAO extends GenericDAO<Vector> {
                         "inner join pimrecord on pimrecord.parent=documentimage.remoteuri " +
                         "inner join pimfieldvalue on pimfieldvalue.pimrecordid=pimrecord.id " +
                         "inner join pimfield on pimfieldvalue.pimfieldid=pimfield.id " +
-                        "where dis.uuid='" + siameseQuery.imageSetUuid + "' " +
-                        "and pimfield.name='" + siameseQuery.pimField + "' " +
+                        "where dis.uuid=:imageSetUuid " +
+                        "and pimfield.name=:pimField " +
                         (siameseQuery.onlyDifferentImages ? "and dids.documentimageid <> " + targetVector.getDocumentImageId() + " " : "") +
-                        (!Strings.isBlank(siameseQuery.pimFieldValue) ? "and pimfieldValue.value='" + siameseQuery.pimFieldValue + "' " : "") +
-                        ";");
+                        (!Strings.isBlank(siameseQuery.pimFieldValue) ? "and pimfieldValue.value=:pimFieldValue " : ""));
+                query.setParameter("imageSetUuid", siameseQuery.imageSetUuid);
+                query.setParameter("pimField", siameseQuery.pimField);
+                if (!Strings.isBlank(siameseQuery.pimFieldValue)) {
+                    query.setParameter("pimFieldValue", siameseQuery.pimFieldValue);
+                }
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
                     imageFilter = "and vectors.documentimageid in " + resultList + " ";
@@ -263,13 +286,16 @@ public class VectorDAO extends GenericDAO<Vector> {
                         "inner join pimrecord on pimrecord.parent=documentimage.remoteuri " +
                         "inner join pimfieldvalue on pimfieldvalue.pimrecordid=pimrecord.id " +
                         "inner join pimfield on pimfieldvalue.pimfieldid=pimfield.id " +
-                        "and pimfield.name='" + siameseQuery.pimField + "' " +
+                        "and pimfield.name=:pimField " +
                         (siameseQuery.onlyDifferentImages ? "and documentimage.id <> " + targetVector.getDocumentImageId() + " " : "") +
                         (siameseQuery.onlyDifferentImageSets ? "and documentimagedataset.documentimagesetid not in (select documentimagedataset.documentimagesetid from documentimage inner join documentimagedataset on documentimage.id = documentimagedataset.documentimageid  where id=" + targetVector.getDocumentImageId() + ") " : "") +
-                        (!Strings.isBlank(siameseQuery.pimFieldValue) ? "and pimfieldValue.value='" + siameseQuery.pimFieldValue + "' " : "") +
-                        ";";
+                        (!Strings.isBlank(siameseQuery.pimFieldValue) ? "and pimfieldValue.value=:pimFieldValue " : "");
                 final Query query = session.createNativeQuery(queryString);
-                LOG.info("documentimage filter: " + queryString);
+                LOG.info("documentimage filter: {}", queryString);
+                query.setParameter("pimField", siameseQuery.pimField);
+                if (!Strings.isBlank(siameseQuery.pimFieldValue)) {
+                    query.setParameter("pimFieldValue", siameseQuery.pimFieldValue);
+                }
 
 
                 final List resultList = query.getResultList();
@@ -283,8 +309,8 @@ public class VectorDAO extends GenericDAO<Vector> {
             }
         } else {
             if (siameseQuery.imageUuid != null) {
-                final Query query = session.createNativeQuery("select id from documentimage " +
-                        "where uuid='" + siameseQuery.imageUuid + "';");
+                final Query query = session.createNativeQuery("select id from documentimage where uuid=:imageUuid");
+                query.setParameter("imageUuid", siameseQuery.imageUuid);
 
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
@@ -293,9 +319,9 @@ public class VectorDAO extends GenericDAO<Vector> {
             } else if (siameseQuery.imageSetUuid != null) {
                 final Query query = session.createNativeQuery("select dids.documentimageid from documentimageset dis " +
                         "inner join documentimagedataset dids on dids.documentimagesetid=dis.id " +
-                        "where dis.uuid='" + siameseQuery.imageSetUuid + "' " +
-                        (siameseQuery.onlyDifferentImages ? "and dids.documentimageid <> " + targetVector.getDocumentImageId() + " " : "") +
-                        ";");
+                        "where dis.uuid=:imageSetUuid " +
+                        (siameseQuery.onlyDifferentImages ? "and dids.documentimageid <> " + targetVector.getDocumentImageId() + " " : ""));
+                query.setParameter("imageSetUuid", siameseQuery.imageSetUuid);
                 final List resultList = query.getResultList();
                 if (!resultList.isEmpty()) {
                     imageFilter = "and vectors.documentimageid in " + resultList + " ";
@@ -349,7 +375,7 @@ public class VectorDAO extends GenericDAO<Vector> {
         query.setFirstResult(skip);
         Stopwatch stopwatch = Stopwatch.createStarted();
         Stream<Object[]> rows = query.stream();
-        System.out.println("duration vectorquery: " + stopwatch.stop());
+        LOG.debug("duration vectorquery: {}", stopwatch.stop());
         stopwatch = Stopwatch.createStarted();
         Stream<Map<String, ?>> result = rows.map(row -> {
             final HashMap<String, Object> vector = new HashMap<>();
@@ -364,7 +390,7 @@ public class VectorDAO extends GenericDAO<Vector> {
 
             return vector;
         });
-        System.out.println("duration map: " + stopwatch.stop());
+        LOG.debug("duration map: {}", stopwatch.stop());
         return result;
     }
 
@@ -373,13 +399,17 @@ public class VectorDAO extends GenericDAO<Vector> {
         if (targetVector == null) {
             return Stream.empty();
         }
-        final String queryString = "select vectors.id as vectorid, cast(documentocrresultline.uuid as varchar) as documentocrresultlineuuid, cast(vectors.uuid as varchar) as vectoruuid, cast(documentimage.uuid as varchar) as documentimageid, cube((select vector from vectors where id = " + targetVector.getId() + ")) " + siameseQuery.distanceAlgorithm.getValue() + " vector as distance from documentImage \n " +
-                "inner join vectors on documentimage.id=vectors.documentimageid \n" +
-                "inner join documentocrresultline on vectors.documentocrresultline_id=documentocrresultline.id\n" +
-                "where documentimage.uuid='" + siameseQuery.imageUuid + "'\n" +
-                "order by distance \n" +
-                "limit " + limit + ";";
+        final String queryString = "select vectors.id as vectorid, cast(documentocrresultline.uuid as varchar) as documentocrresultlineuuid, "
+                + "cast(vectors.uuid as varchar) as vectoruuid, cast(documentimage.uuid as varchar) as documentimageid, "
+                + "cube((select vector from vectors where id = " + targetVector.getId() + ")) "
+                + siameseQuery.distanceAlgorithm.getValue() + " vector as distance from documentImage \n "
+                + "inner join vectors on documentimage.id=vectors.documentimageid \n"
+                + "inner join documentocrresultline on vectors.documentocrresultline_id=documentocrresultline.id\n"
+                + "where documentimage.uuid=:imageUuid \n"
+                + "order by distance";
         final NativeQuery<Object[]> query = session.<Object[]>createNativeQuery(queryString);
+        query.setParameter("imageUuid", siameseQuery.imageUuid);
+        query.setMaxResults(limit);
 
 
         return query.stream().map(row -> {
@@ -402,16 +432,23 @@ public class VectorDAO extends GenericDAO<Vector> {
         if (targetVector == null) {
             return Stream.empty();
         }
-        final String queryString = "select vectors.id as vectorid, cast(documentocrresultline.uuid as varchar) as documentocrresultlineuuid, cast(vectors.uuid as varchar) as vectoruuid, cast(documentimage.uuid as varchar) as documentimageid, cube((select vector from vectors where id = " + targetVector.getId() + ")) " + siameseQuery.distanceAlgorithm.getValue() + " vector as distance from documentImage \n" +
-                "inner join vectors on documentimage.id=vectors.documentimageid \n" +
-                "inner join documentimagedataset on documentimage.id = documentimagedataset.documentimageid \n" +
-                "inner join documentimageset on documentimageset.id = documentimagedataset.documentimagesetid \n" +
-                "inner join documentocrresultline on vectors.documentocrresultline_id=documentocrresultline.id\n" +
-                "where documentimageset.uuid='" + siameseQuery.imageSetUuid + "'\n " +
-                (siameseQuery.imageUuid != null ? "and documentimage.uuid='" + siameseQuery.imageUuid + "'\n" : "") +
-                "order by distance \n" +
-                "limit " + limit + ";";
+        final String queryString = "select vectors.id as vectorid, cast(documentocrresultline.uuid as varchar) as documentocrresultlineuuid, "
+                + "cast(vectors.uuid as varchar) as vectoruuid, cast(documentimage.uuid as varchar) as documentimageid, "
+                + "cube((select vector from vectors where id = " + targetVector.getId() + ")) "
+                + siameseQuery.distanceAlgorithm.getValue() + " vector as distance from documentImage \n"
+                + "inner join vectors on documentimage.id=vectors.documentimageid \n"
+                + "inner join documentimagedataset on documentimage.id = documentimagedataset.documentimageid \n"
+                + "inner join documentimageset on documentimageset.id = documentimagedataset.documentimagesetid \n"
+                + "inner join documentocrresultline on vectors.documentocrresultline_id=documentocrresultline.id\n"
+                + "where documentimageset.uuid=:imageSetUuid \n "
+                + (siameseQuery.imageUuid != null ? "and documentimage.uuid=:imageUuid \n" : "")
+                + "order by distance";
         final NativeQuery<Object[]> query = session.<Object[]>createNativeQuery(queryString);
+        query.setParameter("imageSetUuid", siameseQuery.imageSetUuid);
+        if (siameseQuery.imageUuid != null) {
+            query.setParameter("imageUuid", siameseQuery.imageUuid);
+        }
+        query.setMaxResults(limit);
 
 
         return query.stream().map(row -> {

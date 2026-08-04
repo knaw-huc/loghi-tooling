@@ -43,6 +43,9 @@ public class LoghiWebserviceConfiguration extends Configuration {
     private ExecutorServiceConfig detectLanguageOfPageXmlResourceExecutorService;
 
     @JsonProperty
+    private ExecutorServiceConfig extractAndCutExecutorServiceConfig;
+
+    @JsonProperty
     private SecurityConfig securityConfig;
 
     public void registerExtractBaseLinesResource(Environment environment, MetricRegistry metricRegistry) {
@@ -82,6 +85,13 @@ public class LoghiWebserviceConfiguration extends Configuration {
         final ExecutorService executorService = detectLanguageOfPageXmlResourceExecutorService.createExecutorService(environment, metricRegistry);
         final Supplier<String> queueUsageStatusSupplier = detectLanguageOfPageXmlResourceExecutorService.createQueueUsageStatusSupplier(metricRegistry);
         environment.jersey().register(new DetectLanguageOfPageXmlResource(uploadLocation, executorService, queueUsageStatusSupplier, detectLanguageOfPageXmlResourceExecutorService.getLedgerSize()));
+    }
+
+    public void registerExtractAndCutResource(Environment environment, MetricRegistry metricRegistry) {
+        final ExecutorService executorService = extractAndCutExecutorServiceConfig.createExecutorService(environment, metricRegistry);
+        final Supplier<String> queueUsageStatusSupplier = extractAndCutExecutorServiceConfig.createQueueUsageStatusSupplier(metricRegistry);
+        environment.jersey().register(new ExtractAndCutResource(executorService, uploadLocation, p2palaConfigFile,
+                laypaConfig, queueUsageStatusSupplier, extractAndCutExecutorServiceConfig.getLedgerSize()));
     }
 
     public void registerSecurity(Environment environment) {

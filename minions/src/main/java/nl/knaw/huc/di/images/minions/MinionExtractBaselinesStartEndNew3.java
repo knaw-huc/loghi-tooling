@@ -12,8 +12,8 @@ import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
 import org.apache.commons.io.FilenameUtils;
-import org.opencv.core.Point;
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
@@ -43,6 +43,12 @@ This takes pageXML and an png containing baselines
  */
 public class MinionExtractBaselinesStartEndNew3 implements Runnable, AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(MinionExtractBaselinesStartEndNew3.class);
+    /**
+     * Shared, thread-safe {@link XmlMapper}. Creating a new {@code XmlMapper}
+     * is expensive (reflective initialisation); reusing one instance avoids
+     * that cost per processed file (SMELL-06).
+     */
+    private static final XmlMapper XML_MAPPER = new XmlMapper();
 
     static {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
@@ -326,17 +332,15 @@ public class MinionExtractBaselinesStartEndNew3 implements Runnable, AutoCloseab
         newTextLines.addAll(newMergedTextLines);
         newTextLines.addAll(newTextLinesWithoutStartAndEnd);
 
-        System.out.println(imageFilename + " possible baselines: " + numLabels);
-        System.out.println(imageFilename + " found baselines: " + newTextLines.size());
-        System.out.println(imageFilename + " merged baselines: " + mergedBaselines);
-        System.out.println(imageFilename + " total explained baselines: " + (newTextLines.size() + mergedBaselines));
-        System.out.println(imageFilename + " total not explained baselines: " + (numLabels - (newTextLines.size() + mergedBaselines)));
-        System.out.println(imageFilename + " linesWithoutStartAndEnd: " + linesWithoutStartAndEnd);
-        System.out.println(imageFilename + " smallLines: " + smallLines);
-        System.out.println(imageFilename + " linesWithMultipleStart: " + linesWithMultipleStart);
-        System.out.println(imageFilename + " linesWithMultipleEnd: " + linesWithMultipleEnd);
-
-
+        LOG.info("{} possible baselines: {}", imageFilename, numLabels);
+        LOG.info("{} found baselines: {}", imageFilename, newTextLines.size());
+        LOG.info("{} merged baselines: {}", imageFilename, mergedBaselines);
+        LOG.info("{} total explained baselines: {}", imageFilename, (newTextLines.size() + mergedBaselines));
+        LOG.info("{} total not explained baselines: {}", imageFilename, (numLabels - (newTextLines.size() + mergedBaselines)));
+        LOG.info("{} linesWithoutStartAndEnd: {}", imageFilename, linesWithoutStartAndEnd);
+        LOG.info("{} smallLines: {}", imageFilename, smallLines);
+        LOG.info("{} linesWithMultipleStart: {}", imageFilename, linesWithMultipleStart);
+        LOG.info("{} linesWithMultipleEnd: {}", imageFilename, linesWithMultipleEnd);
         labeledRemaining = OpenCVWrapper.release(labeledRemaining);
         statsRemaining  = OpenCVWrapper.release(statsRemaining);
         centroidsRemaining  = OpenCVWrapper.release(centroidsRemaining);
@@ -390,47 +394,62 @@ public class MinionExtractBaselinesStartEndNew3 implements Runnable, AutoCloseab
 
         Mat baseLineSubmat = this.baseLineMat.submat(rect);
         Mat labeledSubmat = this.labeled.submat(rect);
-        Mat result;
-        result = LayoutProc.rotate(baseLineSubmat, orientation);
-        Mat labelOnly = Mat.zeros(rect.height, rect.width, CvType.CV_8UC1);
-        for (int i = 0; i < rect.height; i++) {
-            for (int j = 0; j < rect.width; j++) {
-                if (labeledSubmat.get(i, j)[0] == labelNumber) {
-                    labelOnly.put(i, j, baseLineSubmat.get(i, j)[0]);
-                    // clear baselinemat
-                    baseLineSubmat.put(i, j, 0);
+        Mat result = null;
+        Mat labelOnly = null;
+        Mat rotatedMaskedBaselineMat = null;
+        try {
+            result = LayoutProc.rotate(baseLineSubmat, orientation);
+            labelOnly = Mat.zeros(rect.height, rect.width, CvType.CV_8UC1);
+            for (int i = 0; i < rect.height; i++) {
+                for (int j = 0; j < rect.width; j++) {
+                    if (labeledSubmat.get(i, j)[0] == labelNumber) {
+                        labelOnly.put(i, j, baseLineSubmat.get(i, j)[0]);
+                        // clear baselinemat
+                        baseLineSubmat.put(i, j, 0);
+                    }
                 }
             }
+            rotatedMaskedBaselineMat = LayoutProc.rotate(labelOnly, orientation);
+
+            List<Point> baselinePoints = getBaselinePoints(baselineExtractionType, rotatedMaskedBaselineMat);
+
+            for (Point point : baselinePoints) {
+                Point oldCenter = new Point(rect.x + (rect.width / 2), rect.y + (rect.height / 2));
+                Point newCenter = new Point(result.width() / 2, result.height() / 2);
+                Point newPoint = rotateBack(point, oldCenter, newCenter, Math.toRadians(orientation));
+                point.x = newPoint.x;
+                point.y = newPoint.y;
+            }
+
+            if (baselinePoints.size() > 2) {
+                baselinePoints = StringConverter.simplifyPolygon(baselinePoints, 2);
+            }
+
+            // go through image following orientation.
+            // Use seam carving to find best baselinePath
+            TextLine textLine = new TextLine();
+            Baseline baseline = new Baseline();
+            baseline.setPoints(StringConverter.pointToString(baselinePoints));
+            textLine.setBaseline(baseline);
+            textLine.setId(UUID.randomUUID().toString());
+            return textLine;
+        } finally {
+            if (rotatedMaskedBaselineMat != null) {
+                rotatedMaskedBaselineMat = OpenCVWrapper.release(rotatedMaskedBaselineMat);
+            }
+            if (result != null) {
+                result = OpenCVWrapper.release(result);
+            }
+            if (labelOnly != null) {
+                labelOnly = OpenCVWrapper.release(labelOnly);
+            }
+            if (baseLineSubmat != null) {
+                baseLineSubmat = OpenCVWrapper.release(baseLineSubmat);
+            }
+            if (labeledSubmat != null) {
+                labeledSubmat = OpenCVWrapper.release(labeledSubmat);
+            }
         }
-        Mat rotatedMaskedBaselineMat = LayoutProc.rotate(labelOnly, orientation);
-
-        List<Point> baselinePoints = getBaselinePoints(baselineExtractionType, rotatedMaskedBaselineMat);
-
-        for (Point point : baselinePoints) {
-            Point oldCenter = new Point(rect.x + (rect.width / 2), rect.y + (rect.height / 2));
-            Point newCenter = new Point(result.width() / 2, result.height() / 2);
-            Point newPoint = rotateBack(point, oldCenter, newCenter, Math.toRadians(orientation));
-            point.x = newPoint.x;
-            point.y = newPoint.y;
-        }
-
-        if (baselinePoints.size() > 2) {
-            baselinePoints = StringConverter.simplifyPolygon(baselinePoints, 2);
-        }
-
-        rotatedMaskedBaselineMat = OpenCVWrapper.release(rotatedMaskedBaselineMat);
-
-        result = OpenCVWrapper.release(result);
-        labelOnly = OpenCVWrapper.release(labelOnly);
-
-        // go through image following orientation.
-        // Use seam carving to find best baselinePath
-        TextLine textLine = new TextLine();
-        Baseline baseline = new Baseline();
-        baseline.setPoints(StringConverter.pointToString(baselinePoints));
-        textLine.setBaseline(baseline);
-        textLine.setId(UUID.randomUUID().toString());
-        return textLine;
     }
 
     private List<Point> getBaselinePoints(BaselineExtractionType baselineExtractionType, Mat rotatedMaskedBaselineMat) {
@@ -509,9 +528,8 @@ public class MinionExtractBaselinesStartEndNew3 implements Runnable, AutoCloseab
             }
         }
         page.getPage().setTextRegions(goodRegions);
-        XmlMapper mapper = new XmlMapper();
 
-        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(page);
+        return XML_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(page);
     }
 
     private List<Point> getBaselineBySeamCarve(Mat rotatedMaskedBaselineMat) {
@@ -749,20 +767,24 @@ public class MinionExtractBaselinesStartEndNew3 implements Runnable, AutoCloseab
             }
         }
         executor.shutdown();
-        while (!executor.isTerminated()) {
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.DAYS)) {
+                LOG.warn("Timed out waiting for baseline extraction workers to finish");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for baseline extraction workers", e);
         }
-        System.out.println("Finished all threads");
+        LOG.info("Finished all threads");
     }
 
 
     @Override
     public void run() {
+        Mat combinedMat = null;
         try {
-            Mat combinedMat = Imgcodecs.imread(this.imageFile, Imgcodecs.IMREAD_COLOR);
-            List<Mat> bgr = new ArrayList<>();
-            bgr.add(this.baseLineMat);
-            bgr.add(this.baseLineMatStart);
-            bgr.add(this.baseLineMatEnd);
+            combinedMat = OpenCVWrapper.imread(this.imageFile, Imgcodecs.IMREAD_COLOR);
+            List<Mat> bgr = new ArrayList<>(3);
             Core.split(combinedMat, bgr);
             this.baseLineMatEnd = bgr.get(0);
             this.baseLineMatStart = bgr.get(1);
@@ -810,38 +832,48 @@ public class MinionExtractBaselinesStartEndNew3 implements Runnable, AutoCloseab
             clearExistingLines = false;
 //            }
         } catch (IOException | TransformerException e) {
-            e.printStackTrace();
+            LOG.error("Error while processing {}", xmlFile, e);
         } finally {
+            if (combinedMat != null) {
+                combinedMat = OpenCVWrapper.release(combinedMat);
+            }
             try {
                 this.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                LOG.error("Error while releasing Mats for {}", xmlFile, e);
             }
         }
     }
 
     @Override
     public void close() throws Exception {
-        baseLineMat = OpenCVWrapper.release(baseLineMat);
-        baseLineMatStart = OpenCVWrapper.release(baseLineMatStart);
-        baseLineMatEnd = OpenCVWrapper.release(baseLineMatEnd);
-        thresHoldedBaselines = OpenCVWrapper.release(thresHoldedBaselines);
-        thresHoldedBaselinesStart = OpenCVWrapper.release(thresHoldedBaselinesStart);
-        thresHoldedBaselinesEnd = OpenCVWrapper.release(thresHoldedBaselinesEnd);
-        stats = OpenCVWrapper.release(stats);
-        statsStart = OpenCVWrapper.release(statsStart);
-        statsEnd = OpenCVWrapper.release(statsEnd);
-        centroids = OpenCVWrapper.release(centroids);
-        centroidsStart = OpenCVWrapper.release(centroidsStart);
-        centroidsEnd = OpenCVWrapper.release(centroidsEnd);
-        labeled = OpenCVWrapper.release(labeled);
-        labeledStart = OpenCVWrapper.release(labeledStart);
-        labeledEnd = OpenCVWrapper.release(labeledEnd);
-        zeroMat = OpenCVWrapper.release(zeroMat);
-        remainingMat = OpenCVWrapper.release(remainingMat);
-        zeroMatThresholded = OpenCVWrapper.release(zeroMatThresholded);
-        labeledRemaining = OpenCVWrapper.release(labeledRemaining);
-        statsRemaining = OpenCVWrapper.release(statsRemaining);
-        centroidsRemaining = OpenCVWrapper.release(centroidsRemaining);
+        baseLineMat = safeRelease(baseLineMat);
+        baseLineMatStart = safeRelease(baseLineMatStart);
+        baseLineMatEnd = safeRelease(baseLineMatEnd);
+        thresHoldedBaselines = safeRelease(thresHoldedBaselines);
+        thresHoldedBaselinesStart = safeRelease(thresHoldedBaselinesStart);
+        thresHoldedBaselinesEnd = safeRelease(thresHoldedBaselinesEnd);
+        stats = safeRelease(stats);
+        statsStart = safeRelease(statsStart);
+        statsEnd = safeRelease(statsEnd);
+        centroids = safeRelease(centroids);
+        centroidsStart = safeRelease(centroidsStart);
+        centroidsEnd = safeRelease(centroidsEnd);
+        labeled = safeRelease(labeled);
+        labeledStart = safeRelease(labeledStart);
+        labeledEnd = safeRelease(labeledEnd);
+        zeroMat = safeRelease(zeroMat);
+        remainingMat = safeRelease(remainingMat);
+        zeroMatThresholded = safeRelease(zeroMatThresholded);
+        labeledRemaining = safeRelease(labeledRemaining);
+        statsRemaining = safeRelease(statsRemaining);
+        centroidsRemaining = safeRelease(centroidsRemaining);
+    }
+
+    private Mat safeRelease(Mat mat) {
+        if (mat == null || mat.dataAddr() == 0) {
+            return null;
+        }
+        return OpenCVWrapper.release(mat);
     }
 }

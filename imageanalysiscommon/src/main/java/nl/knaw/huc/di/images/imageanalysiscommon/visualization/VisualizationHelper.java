@@ -117,12 +117,17 @@ public class VisualizationHelper {
                 if (cocoBitmap.getRGB(j, i) != Color.black.getRGB()) {
                     Mat submat = colorizedImage.submat(coco.getY(), coco.getY() + coco.getBitMap().getHeight() - 2, coco.getX(), coco.getX() + coco.getWidth() - 2);
                     Mat mask = ImageConversionHelper.bufferedImageToBinaryMat(coco.getBitMap());
-                    Imgproc.floodFill(
-                            submat,
-                            mask,
-                            new Point(j, i),
-                            new Scalar(new Random().nextInt(255), new Random().nextInt(255), new Random().nextInt(255)));
-                    return;
+                    try {
+                        Imgproc.floodFill(
+                                submat,
+                                mask,
+                                new Point(j, i),
+                                new Scalar(new Random().nextInt(255), new Random().nextInt(255), new Random().nextInt(255)));
+                        return;
+                    } finally {
+                        submat.release();
+                        mask.release();
+                    }
                     // // TODO RUTGERCHECK (method is not used): 20-9-16 do not use put, this can be done in such a way that it is faster
 //                    colorizedImage.put(i + coco.getY(), j + coco.getX(), colorArray);
                 }

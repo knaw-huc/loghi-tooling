@@ -140,6 +140,6 @@ public class MinionConvertPageToTxt {
         executor.shutdown();
         executor.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
 
-        System.out.println("Processed " + xmlFilesSeen.get() + " xml files, converted " + txtFilesConverted.get() + " txt files.");
+        LOG.info("Processed {} xml files, converted {} txt files.", xmlFilesSeen.get(), txtFilesConverted.get());
     }
 }

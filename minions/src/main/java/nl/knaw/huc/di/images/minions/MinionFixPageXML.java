@@ -1,5 +1,6 @@
 package nl.knaw.huc.di.images.minions;
 
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import nl.knaw.huc.di.images.layoutds.models.Page.PcGts;
 import nl.knaw.huc.di.images.layoutds.models.Page.TextLine;
@@ -10,6 +11,8 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Options;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.xml.transform.TransformerException;
 import java.io.File;
@@ -18,6 +21,7 @@ import java.nio.file.*;
 /* this just reads and then writes the pagexml again. Fixing some small problems that exist in existing pagexml */
 public class MinionFixPageXML {
 
+    private static final Logger LOG = LoggerFactory.getLogger(MinionFixPageXML.class);
     public static String fixPageXml(String pageXmlString, String targetNameSpace, boolean removeText, boolean removeWords) throws JsonProcessingException, TransformerException {
         PcGts page = PageUtils.readPageFromString(pageXmlString);
         for (TextRegion textRegion : page.getPage().getTextRegions()) {
@@ -47,7 +51,7 @@ public class MinionFixPageXML {
                 } else {
 
                     String filename = path.toAbsolutePath().toString();
-                    System.out.println(filename);
+                    LOG.info("{}", filename);
                     if (filename.endsWith(".xml")) {
                         String pageXmlString = StringTools.readFile(filename);
                         String newPageXml = fixPageXml(pageXmlString, targetNamespace, removeText, removeWords);
@@ -56,7 +60,7 @@ public class MinionFixPageXML {
                 }
             }
         } catch (AccessDeniedException adx) {
-            System.err.println("access denied: " + directory.toAbsolutePath().toString());
+            LOG.warn("access denied: {}", directory.toAbsolutePath().toString());
         }
     }
 
@@ -82,13 +86,13 @@ public class MinionFixPageXML {
         try {
             commandLine = parser.parse(options, args);
         } catch (org.apache.commons.cli.ParseException e) {
-            System.err.println(e.getMessage());
+            LOG.warn("{}", e.getMessage());
             return;
         }
         if (commandLine.hasOption("input_path")) {
             inputXmls = commandLine.getOptionValue("input_path");
         } else {
-            System.err.println("no input path given");
+            LOG.warn("no input path given");
             return;
         }
         if (commandLine.hasOption("removetext")) {

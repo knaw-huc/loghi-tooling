@@ -389,6 +389,62 @@ public class LayoutProcTest {
     }
 
     @Test
+    public void recalculateTextLineContoursFromBaselinesCreatesContours() {
+        System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
+
+        Mat image = new Mat(120, 220, CvType.CV_8UC3, new Scalar(255, 255, 255));
+        Imgproc.line(image, new Point(20, 50), new Point(200, 50), new Scalar(0, 0, 0), 3);
+        Imgproc.line(image, new Point(20, 85), new Point(200, 85), new Scalar(0, 0, 0), 3);
+
+        PcGts page = new PcGts();
+        page.getPage().setImageHeight(120);
+        page.getPage().setImageWidth(220);
+
+        TextRegion textRegion = new TextRegion();
+        TextLine firstLine = new TextLine();
+        firstLine.getBaseline().setPoints("20,50 200,50");
+        textRegion.getTextLines().add(firstLine);
+        TextLine secondLine = new TextLine();
+        secondLine.getBaseline().setPoints("20,85 200,85");
+        textRegion.getTextLines().add(secondLine);
+        page.getPage().getTextRegions().add(textRegion);
+
+        LayoutProc.recalculateTextLineContoursFromBaselines("synthetic", image, page, 1, 15, 6, 1, false);
+
+        for (TextLine textLine : textRegion.getTextLines()) {
+            Assert.assertNotNull(textLine.getCoords().getPoints());
+            assertThat(StringConverter.stringToPoint(textLine.getCoords().getPoints()), hasSize(greaterThan(3)));
+            Assert.assertNotNull(textLine.getTextStyle());
+            assertThat(textLine.getTextStyle().getxHeight(), greaterThanOrEqualTo(LayoutProc.MINIMUM_XHEIGHT));
+        }
+
+        image.release();
+    }
+
+    @Test
+    public void calcSeamImageKeepsLargeFloatPenaltiesFinite() {
+        System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
+
+        Mat energy = new Mat(40, 240, CvType.CV_32F, new Scalar(1));
+        Imgproc.line(energy, new Point(15, 0), new Point(15, 39), new Scalar(1.0e20), 1);
+        Mat seam = OpenCVWrapper.newMat();
+
+        LayoutProc.calcSeamImage(energy, new Size(24, 4), seam);
+
+        float[] value = new float[1];
+        for (int y = 0; y < seam.height(); y++) {
+            for (int x = 0; x < seam.width(); x++) {
+                seam.get(y, x, value);
+                Assert.assertFalse(Float.isNaN(value[0]));
+                Assert.assertFalse(Float.isInfinite(value[0]));
+            }
+        }
+
+        energy.release();
+        seam.release();
+    }
+
+    @Test
     public void splitLinesIntoWordsCoordsXValuesShouldBeInOrder() {
         final TextLine textLine = new TextLine();
         textLine.setTextEquiv(new TextEquiv(null, "SeHoUT er WETLIODSEREN"));
@@ -804,5 +860,10 @@ public class LayoutProcTest {
         LayoutProc.safePut(zeros64F, 0, 0, 1.0);
         double one64F = LayoutProc.getSafeDouble(zeros64F, 0, 0);
         assertThat(one64F, is(1.0));
+
+        Mat zeros32F = OpenCVWrapper.zeros(new Size(100,100), CvType.CV_32F);
+        LayoutProc.safePut(zeros32F, 0, 0, 1.0);
+        double one32F = LayoutProc.getSafeDouble(zeros32F, 0, 0);
+        assertThat(one32F, is(1.0));
     }
 }

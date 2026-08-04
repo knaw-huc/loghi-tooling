@@ -11,14 +11,11 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import nl.knaw.huc.di.images.imageanalysiscommon.StringConverter;
 import nl.knaw.huc.di.images.imageanalysiscommon.UnicodeToAsciiTranslitirator;
-import nl.knaw.huc.di.images.layoutds.models.Page.Label;
 import nl.knaw.huc.di.images.layoutds.models.Page.*;
+import nl.knaw.huc.di.images.layoutds.models.Page.Label;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
-import org.joda.time.LocalDateTime;
 import org.opencv.core.Mat;
 import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
@@ -29,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
+import javax.xml.XMLConstants;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerException;
@@ -44,8 +42,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 
 import static nl.knaw.huc.di.images.stringtools.StringTools.convertStringToXMLDocument;
 
@@ -56,6 +54,23 @@ public class PageUtils {
     public static final String NAMESPACE2013 = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15";
     public static final String NAMESPACE2019 = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15";
     private static final int BLACK = 0;
+
+    /**
+     * Shared, XXE-hardened {@link TransformerFactory}. JAXP factories are expensive to construct
+     * (they scan the classpath for providers); sharing avoids that cost in batch workflows.
+     */
+    private static final TransformerFactory SECURE_TRANSFORMER_FACTORY = buildSecureTransformerFactory();
+
+    private static TransformerFactory buildSecureTransformerFactory() {
+        TransformerFactory transformerFactory = TransformerFactory.newInstance();
+        transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
+        return transformerFactory;
+    }
+
+    private static TransformerFactory createSecureTransformerFactory() {
+        return SECURE_TRANSFORMER_FACTORY;
+    }
 
     public static HashMap<String, Integer> extractRegionTypes(boolean ignoreCase, String baseInput) throws IOException {
         Path inputPath = Paths.get(baseInput);
@@ -151,14 +166,15 @@ public class PageUtils {
         try (DirectoryStream<Path> files = Files.newDirectoryStream(inputPath)) {
             for (Path file : files) {
                 Mat colorized = null;
-                if (file.getFileName().toString().endsWith(".xml")) {
-                    LOG.info(file.toAbsolutePath().toString());
-                    String pageXml = StringTools.readFile(file.toAbsolutePath().toString());
-                    PcGts page = PageUtils.readPageFromString(pageXml);
-                    if (page == null) {
-                        LOG.error("Can not get PageXML: " + file.getFileName().toString());
-                        continue;
-                    }
+                try {
+                    if (file.getFileName().toString().endsWith(".xml")) {
+                        LOG.info(file.toAbsolutePath().toString());
+                        String pageXml = StringTools.readFile(file.toAbsolutePath().toString());
+                        PcGts page = PageUtils.readPageFromString(pageXml);
+                        if (page == null) {
+                            LOG.error("Can not get PageXML: " + file.getFileName().toString());
+                            continue;
+                        }
                     if (page.getMetadata().getTranskribusMetadata() != null &&
                             (!"GT".equals(page.getMetadata().getTranskribusMetadata().getStatus()) &&
                                     !"FINAL".equals(page.getMetadata().getTranskribusMetadata().getStatus())
@@ -205,6 +221,14 @@ public class PageUtils {
                     if (colorized != null) {
                         String outputFile = FilenameUtils.removeExtension(file.getFileName().toString()) + ".jpg";
                         Imgcodecs.imwrite("/tmp/errors/" + outputFile, colorized);
+                    }
+
+                    }
+                } finally {
+                    // Ensure the image Mat is always released, even if an
+                    // unchecked exception bubbles out of the loop above
+                    // (EXT-MAT-03).
+                    if (colorized != null && colorized.dataAddr() != 0) {
                         colorized.release();
                     }
 
@@ -257,7 +281,7 @@ public class PageUtils {
             page.setSchemaLocation("http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15 http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15/pagecontent.xsd");
 
             final StreamSource xsltSource = new StreamSource(PageUtils.class.getResourceAsStream("/transformpage.xslt"));
-            final TransformerFactory transformerFactory = TransformerFactory.newInstance();
+            final TransformerFactory transformerFactory = createSecureTransformerFactory();
             final Transformer transformer = transformerFactory.newTransformer(xsltSource);
             // pretty print
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
@@ -491,29 +515,36 @@ public class PageUtils {
     }
 
     private static Date getDate(Node node) {
-        Date date = null;
         if (Strings.isNullOrEmpty(node.getTextContent())) {
             return null;
         }
+        final String text = node.getTextContent();
         try {
             // Should never happen, PAGE XML should only contain UTC times
-            OffsetDateTime offsetDateTime = OffsetDateTime.parse(node.getTextContent());
-            long epochMilli = offsetDateTime.toInstant().toEpochMilli();
-            date = new Date(epochMilli);
+            OffsetDateTime offsetDateTime = OffsetDateTime.parse(text);
+            return new Date(offsetDateTime.toInstant().toEpochMilli());
         } catch (Exception ex) {
             try {
-                DateTime dateTime = new DateTime(node.getTextContent(), DateTimeZone.UTC);
-                date = dateTime.toDate();
+                // OPT-04: replaces joda DateTime(string, UTC) parse.
+                // PAGE XML timestamps are written by Jackson in UTC, so interpret
+                // bare (no-offset) timestamps as UTC to round-trip exactly.
+                return Date.from(java.time.LocalDateTime.parse(text)
+                        .atZone(java.time.ZoneOffset.UTC)
+                        .toInstant());
             } catch (Exception subEx) {
                 try {
-                    LocalDateTime localDateTime = LocalDateTime.parse(node.getTextContent());
-                    date = localDateTime.toDate(TimeZone.getDefault());
+                    // Last-resort: assume the system default zone (matches old joda
+                    // LocalDateTime.toDate(TimeZone.getDefault()) fallback).
+                    return Date.from(java.time.LocalDateTime.parse(text)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toInstant());
                 } catch (Exception subSubEx) {
+                    LOG.debug("Could not parse date '{}'", text);
                 }
             }
         }
 
-        return date;
+        return null;
     }
 
     private static Metadata getMetaData(Node parent) {
@@ -1736,146 +1767,154 @@ public class PageUtils {
             IOException, TransformerException {
         String filename = imageFile.toAbsolutePath().toString();
         Mat image = Imgcodecs.imread(filename);
-        if (image.height() == 0) {
-            LOG.error("image is empty: " + filename);
-            image.release();
-            return;
-        }
         Mat grayImage = new Mat();
         Mat binaryImage = new Mat();
-        Imgproc.cvtColor(image, grayImage, Imgproc.COLOR_BGR2GRAY);
-        image.release();
-        int blockSize = grayImage.width() / 50; // default should be something like width / 50
-        if (blockSize % 2 == 0) {
-            blockSize++;
-        }
-        if (blockSize <= 1) {
-            blockSize = 3;
-        }
-
-        Imgproc.adaptiveThreshold(grayImage, binaryImage, 255, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV, blockSize, 15);
-        grayImage.release();
-
-        PcGts page = PageUtils.readPageFromFile(pageFile);
-        for (TextRegion textRegion : page.getPage().getTextRegions()) {
-            List<TextLine> textLinesToRemove = new ArrayList<>();
-            for (TextLine textLine : textRegion.getTextLines()) {
-                // remove white space before the baseline
-                String baselinePoints = textLine.getBaseline().getPoints();
-                if (Strings.isNullOrEmpty(baselinePoints)) {
-                    textLinesToRemove.add(textLine);
-                    continue;
-                }
-                List<org.opencv.core.Point> baseline = StringConverter.stringToPoint(baselinePoints);
-                if (baseline.size() < 2) {
-                    textLinesToRemove.add(textLine);
-                    continue;
-                }
-                List<org.opencv.core.Point> expanded = StringConverter.expandPointList(baseline);
-                if (baseline.isEmpty()) {
-                    textLinesToRemove.add(textLine);
-                    continue;
-                }
-                int bestX = (int) baseline.get(0).x;
-                boolean found = false;
-                int counter = 0;
-                int above = 20;
-                TextStyle textStyle = textLine.getTextStyle();
-                Integer xHeight = null;
-                if (textStyle != null) {
-                    xHeight = textStyle.getxHeight();
-                }
-                if (xHeight != null && xHeight > 10) {
-                    above = 2 * xHeight;
-                }
-                Integer below = xHeight;
-                if (below == null || below == 0) {
-                    below = 10;
-                }
-                for (org.opencv.core.Point point : expanded) {
-                    counter++;
-                    int startY = (int) point.y + above;
-                    if (startY > binaryImage.height()) {
-                        startY = binaryImage.height() - 1;
-                    }
-                    for (int i = startY; i > 0 && i > point.y - below; i--) {
-                        byte[] data = new byte[1];
-                        binaryImage.get(i, (int) point.x, data);
-                        if (data[0] != BLACK) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found || counter > 50) {
-                        bestX = (int) point.x;
-                        break;
-                    }
-                }
-                List<org.opencv.core.Point> pointsToRemove = new ArrayList<>();
-                for (org.opencv.core.Point point : baseline) {
-                    if (point.x <= bestX) {
-                        pointsToRemove.add(point);
-                    }
-                }
-                baseline.removeAll(pointsToRemove);
-
-                if (!pointsToRemove.isEmpty()) {
-                    pointsToRemove.get(pointsToRemove.size() - 1).x = bestX;
-                    baseline.add(0, pointsToRemove.get(pointsToRemove.size() - 1));
-                } else {
-                    baseline.get(0).x = bestX;
-                }
-                // remove white space after the baseline
-                baseline = Lists.reverse(baseline);
-                expanded = Lists.reverse(expanded);
-                bestX = (int) baseline.get(0).x;
-                found = false;
-                counter = 0;
-                for (org.opencv.core.Point point : expanded) {
-                    counter++;
-                    int startY = (int) point.y + below;
-                    if (startY > binaryImage.height()) {
-                        startY = binaryImage.height() - 1;
-                    }
-                    for (int i = startY; i > 0 && i > point.y - above; i--) {
-                        byte[] data = new byte[1];
-                        binaryImage.get(i, (int) point.x, data);
-                        if (data[0] != BLACK) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found || counter > 50) {
-                        bestX = (int) point.x;
-                        break;
-                    }
-                }
-                pointsToRemove = new ArrayList<>();
-                for (Point point : baseline) {
-                    if (point.x >= bestX) {
-                        pointsToRemove.add(point);
-                    }
-                }
-                baseline.removeAll(pointsToRemove);
-                if (!pointsToRemove.isEmpty()) {
-                    Point lastRemovedPoint = pointsToRemove.get(pointsToRemove.size() - 1);
-                    lastRemovedPoint.x = bestX;
-                    baseline.add(0, lastRemovedPoint);
-                } else {
-                    baseline.get(0).x = bestX;
-                }
-                baseline = Lists.reverse(baseline);
-                baseline = StringConverter.simplifyPolygon(baseline, 1);
-                textLine.setBaseline(new Baseline());
-                textLine.getBaseline().setPoints(StringConverter.pointToString(baseline));
-                if (baseline.size() < 2) {
-                    textLinesToRemove.add(textLine);
-                }
+        try {
+            if (image.height() == 0) {
+                LOG.error("image is empty: {}", filename);
+                return;
             }
-            textRegion.getTextLines().removeAll(textLinesToRemove);
+            Imgproc.cvtColor(image, grayImage, Imgproc.COLOR_BGR2GRAY);
+            int blockSize = grayImage.width() / 50; // default should be something like width / 50
+            if (blockSize % 2 == 0) {
+                blockSize++;
+            }
+            if (blockSize <= 1) {
+                blockSize = 3;
+            }
+
+            Imgproc.adaptiveThreshold(grayImage, binaryImage, 255, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV, blockSize, 15);
+
+            PcGts page = PageUtils.readPageFromFile(pageFile);
+            for (TextRegion textRegion : page.getPage().getTextRegions()) {
+                List<TextLine> textLinesToRemove = new ArrayList<>();
+                for (TextLine textLine : textRegion.getTextLines()) {
+                    // remove white space before the baseline
+                    String baselinePoints = textLine.getBaseline().getPoints();
+                    if (Strings.isNullOrEmpty(baselinePoints)) {
+                        textLinesToRemove.add(textLine);
+                        continue;
+                    }
+                    List<org.opencv.core.Point> baseline = StringConverter.stringToPoint(baselinePoints);
+                    if (baseline.size() < 2) {
+                        textLinesToRemove.add(textLine);
+                        continue;
+                    }
+                    List<org.opencv.core.Point> expanded = StringConverter.expandPointList(baseline);
+                    if (baseline.isEmpty()) {
+                        textLinesToRemove.add(textLine);
+                        continue;
+                    }
+                    int bestX = (int) baseline.get(0).x;
+                    boolean found = false;
+                    int counter = 0;
+                    int above = 20;
+                    TextStyle textStyle = textLine.getTextStyle();
+                    Integer xHeight = null;
+                    if (textStyle != null) {
+                        xHeight = textStyle.getxHeight();
+                    }
+                    if (xHeight != null && xHeight > 10) {
+                        above = 2 * xHeight;
+                    }
+                    Integer below = xHeight;
+                    if (below == null || below == 0) {
+                        below = 10;
+                    }
+                    for (org.opencv.core.Point point : expanded) {
+                        counter++;
+                        int startY = (int) point.y + above;
+                        if (startY > binaryImage.height()) {
+                            startY = binaryImage.height() - 1;
+                        }
+                        for (int i = startY; i > 0 && i > point.y - below; i--) {
+                            byte[] data = new byte[1];
+                            binaryImage.get(i, (int) point.x, data);
+                            if (data[0] != BLACK) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found || counter > 50) {
+                            bestX = (int) point.x;
+                            break;
+                        }
+                    }
+                    List<org.opencv.core.Point> pointsToRemove = new ArrayList<>();
+                    for (org.opencv.core.Point point : baseline) {
+                        if (point.x <= bestX) {
+                            pointsToRemove.add(point);
+                        }
+                    }
+                    baseline.removeAll(pointsToRemove);
+
+                    if (!pointsToRemove.isEmpty()) {
+                        pointsToRemove.get(pointsToRemove.size() - 1).x = bestX;
+                        baseline.add(0, pointsToRemove.get(pointsToRemove.size() - 1));
+                    } else {
+                        baseline.get(0).x = bestX;
+                    }
+                    // remove white space after the baseline
+                    baseline = Lists.reverse(baseline);
+                    expanded = Lists.reverse(expanded);
+                    bestX = (int) baseline.get(0).x;
+                    found = false;
+                    counter = 0;
+                    for (org.opencv.core.Point point : expanded) {
+                        counter++;
+                        int startY = (int) point.y + below;
+                        if (startY > binaryImage.height()) {
+                            startY = binaryImage.height() - 1;
+                        }
+                        for (int i = startY; i > 0 && i > point.y - above; i--) {
+                            byte[] data = new byte[1];
+                            binaryImage.get(i, (int) point.x, data);
+                            if (data[0] != BLACK) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found || counter > 50) {
+                            bestX = (int) point.x;
+                            break;
+                        }
+                    }
+                    pointsToRemove = new ArrayList<>();
+                    for (Point point : baseline) {
+                        if (point.x >= bestX) {
+                            pointsToRemove.add(point);
+                        }
+                    }
+                    baseline.removeAll(pointsToRemove);
+                    if (!pointsToRemove.isEmpty()) {
+                        Point lastRemovedPoint = pointsToRemove.get(pointsToRemove.size() - 1);
+                        lastRemovedPoint.x = bestX;
+                        baseline.add(0, lastRemovedPoint);
+                    } else {
+                        baseline.get(0).x = bestX;
+                    }
+                    baseline = Lists.reverse(baseline);
+                    baseline = StringConverter.simplifyPolygon(baseline, 1);
+                    textLine.setBaseline(new Baseline());
+                    textLine.getBaseline().setPoints(StringConverter.pointToString(baseline));
+                    if (baseline.size() < 2) {
+                        textLinesToRemove.add(textLine);
+                    }
+                }
+                textRegion.getTextLines().removeAll(textLinesToRemove);
+            }
+            writePageToFile(page, namespace, pageFile);
+        } finally {
+            if (binaryImage != null) {
+                binaryImage.release();
+            }
+            if (grayImage != null) {
+                grayImage.release();
+            }
+            if (image != null) {
+                image.release();
+            }
         }
-        binaryImage.release();
-        writePageToFile(page, namespace, pageFile);
     }
 
     private static Point findTopLeft(List<Point> points) {

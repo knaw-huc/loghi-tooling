@@ -1,16 +1,23 @@
 package nl.knaw.huc.di.images.layoutds.models.prizepapers;
 
+
 import com.google.common.base.Strings;
 import nl.knaw.huc.di.images.layoutds.models.pim.IPimObject;
 import org.hibernate.annotations.Type;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.*;
 import javax.xml.bind.annotation.XmlRootElement;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.UUID;
 
 @Entity
 @XmlRootElement
 public class HCADescription implements IPimObject {
+    private static final Logger LOG = LoggerFactory.getLogger(HCADescription.class);
     public HCADescription() {
         this.uuid = UUID.randomUUID();
     }
@@ -124,7 +131,7 @@ public class HCADescription implements IPimObject {
                     shipname += " (" + origins.get(key).trim() + ")";
                 }
                 if (!Strings.isNullOrEmpty(shipname)) {
-                    System.out.println(shipname);
+                    LOG.info("{}", shipname);
                     shipnames.add(shipname);
                 }
             }
@@ -154,7 +161,7 @@ public class HCADescription implements IPimObject {
                 for (String aSplitted : splitted) {
                     String shipmaster = aSplitted.substring(aSplitted.indexOf(" ") + 1).trim();
                     if (!Strings.isNullOrEmpty(shipmaster)) {
-                        System.out.println(shipmaster);
+                        LOG.warn("{}", shipmaster);
                         shipmasters.add(shipmaster);
                     }
                 }

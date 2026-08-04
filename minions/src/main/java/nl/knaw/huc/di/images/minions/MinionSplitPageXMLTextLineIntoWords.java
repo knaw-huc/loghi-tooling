@@ -4,7 +4,6 @@ import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.LayoutProc;
 import nl.knaw.huc.di.images.layoutds.models.Page.PcGts;
 import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import nl.knaw.huc.di.images.pipelineutils.ErrorFileWriter;
-import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +20,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -56,7 +54,6 @@ public class MinionSplitPageXMLTextLineIntoWords implements Runnable, AutoClosea
         );
         options.addOption("help", false, "prints this help dialog");
         options.addOption("use_2013_namespace", "set PageXML namespace to 2013, to avoid causing problems with Transkribus");
-        options.addOption("threads", true, "number of threads to use");
 
         return options;
     }
@@ -124,9 +121,8 @@ public class MinionSplitPageXMLTextLineIntoWords implements Runnable, AutoClosea
         }
 
         executor.shutdown();
-        while (!executor.isTerminated()) {
-        }
-        System.out.println("Finished all threads");
+
+        LOG.info("Finished all threads");
     }
 
     public void splitIntoWords(Supplier<PcGts> pageSupplier, String outputFile, String namespace) throws IOException, TransformerException {
@@ -163,7 +159,7 @@ public class MinionSplitPageXMLTextLineIntoWords implements Runnable, AutoClosea
             try {
                 this.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                LOG.error("Unexpected error", e);
             }
         }
     }

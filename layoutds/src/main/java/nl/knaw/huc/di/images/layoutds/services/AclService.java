@@ -21,13 +21,13 @@ public class AclService {
 
     public Set<Acl> getAclsOfEnitity(Session session, UUID subjectId, PimUser pimUser) throws PimSecurityException {
         if (!pimUser.getDisabled()) {
-            final Stream<Acl> aclStream = aclDao.getBySubjectUuid(session, subjectId);
-
             if (pimUser.isAdmin()) {
-                return aclStream.collect(Collectors.toSet());
+                return aclDao.getBySubjectUuid(session, subjectId).collect(Collectors.toSet());
             } else if (getRolesInPrimaryGroup(pimUser).contains(Role.PI)) {
                 final Set<PimGroup> hierarchy = pimUser.getSuperGroupsInHierarchyPrimaryGroup();
-                return aclStream.filter(acl -> hierarchy.contains(acl.getGroup())).collect(Collectors.toSet());
+                return aclDao.getBySubjectUuid(session, subjectId)
+                        .filter(acl -> hierarchy.contains(acl.getGroup()))
+                        .collect(Collectors.toSet());
             }
         }
 

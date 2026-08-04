@@ -23,47 +23,51 @@ public class SiameseNetworkImageSetCreator {
 
     public static void create(PimUser pimUser, DocumentImageSet fromSet, PimFieldDefinition pimField, Function<UUID, String> createRemoteUri) {
         try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
-            final PimRecordDAO pimRecordDAO = new PimRecordDAO();
-            final DocumentImageDAO documentImageDAO = new DocumentImageDAO();
-            Map<String, DocumentImageSet> subSets = new HashMap<>();
-
-            pimRecordDAO.getRecordsByDataset(session, fromSet.getRemoteUri(), false, null)
-                    .map(record -> {
-                        final Optional<PimFieldValue> any = record.getFieldValues().stream().filter(pimFieldValue -> pimFieldValue.getField().getId().equals(pimField.getId())).findAny();
-                        return Pair.of(record.getParent(), any.map(PimFieldValue::getValue).orElse(null));
-                    })
-                    .filter(imageValue -> imageValue.getSecond() != null)
-                    .forEach(imageValue -> {
-                        final DocumentImageSet subSet = subSets.computeIfAbsent(imageValue.getSecond(), value -> {
-                            final DocumentImageSet documentImageSet = new DocumentImageSet();
-                            documentImageSet.setImageset(subset(fromSet, value, documentImageSet.getCreated()));
-                            documentImageSet.setRemoteUri(createRemoteUri.apply(documentImageSet.getUuid()));
-                            documentImageSet.setUri(documentImageSet.getImageset() + "_" + documentImageSet.getUuid());
-                            documentImageSet.setOwner(pimUser);
-                            return documentImageSet;
-                        });
-                        final DocumentImage image = documentImageDAO.getByRemoteUri(imageValue.getFirst());
-                        subSet.getDocumentImages().add(image);
-                    });
-
             final Transaction transaction = session.beginTransaction();
-            final DocumentImageSetDAO documentImageSetDAO = new DocumentImageSetDAO();
+            try {
+                final PimRecordDAO pimRecordDAO = new PimRecordDAO();
+                final DocumentImageDAO documentImageDAO = new DocumentImageDAO();
+                Map<String, DocumentImageSet> subSets = new HashMap<>();
 
-            for (DocumentImageSet value : subSets.values()) {
-                documentImageSetDAO.save(value);
+                pimRecordDAO.getRecordsByDataset(session, fromSet.getRemoteUri(), false, null)
+                        .map(record -> {
+                            final Optional<PimFieldValue> any = record.getFieldValues().stream().filter(pimFieldValue -> pimFieldValue.getField().getId().equals(pimField.getId())).findAny();
+                            return Pair.of(record.getParent(), any.map(PimFieldValue::getValue).orElse(null));
+                        })
+                        .filter(imageValue -> imageValue.getSecond() != null)
+                        .forEach(imageValue -> {
+                            final DocumentImageSet subSet = subSets.computeIfAbsent(imageValue.getSecond(), value -> {
+                                final DocumentImageSet documentImageSet = new DocumentImageSet();
+                                documentImageSet.setImageset(subset(fromSet, value, documentImageSet.getCreated()));
+                                documentImageSet.setRemoteUri(createRemoteUri.apply(documentImageSet.getUuid()));
+                                documentImageSet.setUri(documentImageSet.getImageset() + "_" + documentImageSet.getUuid());
+                                documentImageSet.setOwner(pimUser);
+                                return documentImageSet;
+                            });
+                            final DocumentImage image = documentImageDAO.getByRemoteUri(imageValue.getFirst());
+                            subSet.getDocumentImages().add(image);
+                        });
+
+                final DocumentImageSetDAO documentImageSetDAO = new DocumentImageSetDAO();
+
+                for (DocumentImageSet value : subSets.values()) {
+                    documentImageSetDAO.save(session, value);
+                }
+
+                final DocumentImageSet documentImageSet = new DocumentImageSet();
+                documentImageSet.setUri(documentImageSet.getImageset() + "_" + documentImageSet.getUuid());
+                documentImageSet.setRemoteUri(createRemoteUri.apply(documentImageSet.getUuid()));
+                documentImageSet.setImageset(rootName(fromSet.getImageset(), pimField.getName(), documentImageSet.getCreated()));
+                documentImageSet.setOwner(pimUser);
+                documentImageSet.setSubSets(new HashSet<>(subSets.values()));
+
+                documentImageSetDAO.save(session, documentImageSet);
+
+                transaction.commit();
+            } catch (RuntimeException e) {
+                transaction.rollback();
+                throw e;
             }
-
-            final DocumentImageSet documentImageSet = new DocumentImageSet();
-            documentImageSet.setUri(documentImageSet.getImageset() + "_" + documentImageSet.getUuid());
-            documentImageSet.setRemoteUri(createRemoteUri.apply(documentImageSet.getUuid()));
-            documentImageSet.setImageset(rootName(fromSet.getImageset(), pimField.getName(), documentImageSet.getCreated()));
-            documentImageSet.setOwner(pimUser);
-            documentImageSet.setSubSets(new HashSet<>(subSets.values()));
-
-            documentImageSetDAO.save(session, documentImageSet);
-
-
-            transaction.commit();
         }
     }
 

@@ -6,12 +6,13 @@ import nl.knaw.huc.di.images.imageanalysiscommon.model.ComposedBlock;
 import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.LayoutProc;
 import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.OpenCVWrapper;
 import nl.knaw.huc.di.images.layoutds.models.DocumentTextBlock;
-import nl.knaw.huc.di.images.layoutds.models.DocumentTextLine;
 import nl.knaw.huc.di.images.layoutds.models.connectedComponent.ConnectedComponent;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.Transient;
 import java.awt.image.BufferedImage;
@@ -24,7 +25,8 @@ import static org.opencv.core.Core.countNonZero;
 import static org.opencv.core.CvType.CV_32FC3;
 import static org.opencv.core.CvType.CV_8U;
 
-public class DocumentPage {
+public class DocumentPage implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(DocumentPage.class);
 
     private final Mat image;
     private List<Integer> otsuProfileVertical = null;
@@ -140,7 +142,7 @@ public class DocumentPage {
                 if (!found) {
                     counter++;
                     found = true;
-                    System.out.println("found large line: " + j);
+                    LOG.info("found large line: {}", j);
                 }
             } else {
                 found = false;
@@ -263,11 +265,11 @@ public class DocumentPage {
             Mat clone = getBinaryImage().clone();
             long start = System.currentTimeMillis();
             if (LayoutConfiguration.getGlobal().isOutputDebug()) {
-                System.out.println("getting cocos");
+                LOG.info("getting cocos");
             }
             java.util.List<ConnectedComponent> cocos = getCocos();//
             if (LayoutConfiguration.getGlobal().isOutputDebug()) {
-                System.out.printf("getting cocos took: %s%n", System.currentTimeMillis() - start);
+                LOG.debug("getting cocos took: {}", System.currentTimeMillis() - start);
             }
             int minsize = clone.width() / 800;
             if (isDoublePage()) {
@@ -279,12 +281,11 @@ public class DocumentPage {
             if (minsize < 10) { // this will remove dots and accents, but those are generally not needed for the layout analysis.
                 minsize = 10;
             }
-            System.err.println("minsize for despeckling: " + minsize);
-
+            LOG.warn("minsize for despeckling: {}", minsize);
             start = System.currentTimeMillis();
             LayoutProc.deSpeckle(clone, cocos, minsize);
             if (LayoutConfiguration.getGlobal().isOutputDebug()) {
-                System.out.printf("actual despeckling took: %s%n", System.currentTimeMillis() - start);
+                LOG.debug("actual despeckling took: {}", System.currentTimeMillis() - start);
             }
             despeckledImage = clone;
         }
@@ -461,10 +462,15 @@ public class DocumentPage {
     public boolean isBinary() {
         if (image.channels() < 2) {
             Mat bin = new Mat();
-            Imgproc.threshold(image, bin, 127, 255, Imgproc.THRESH_BINARY);
             Mat dst = new Mat();
-            absdiff(bin, image, dst);
-            return countNonZero(dst) <= 0;
+            try {
+                Imgproc.threshold(image, bin, 127, 255, Imgproc.THRESH_BINARY);
+                absdiff(bin, image, dst);
+                return countNonZero(dst) <= 0;
+            } finally {
+                bin.release();
+                dst.release();
+            }
 
         } else {
 
@@ -473,15 +479,22 @@ public class DocumentPage {
             bgr.add(new Mat());
             bgr.add(new Mat());
             bgr.add(new Mat());
-            Core.split(image, bgr);
-            absdiff(bgr.get(0), bgr.get(1), dst);
+            try {
+                Core.split(image, bgr);
+                absdiff(bgr.get(0), bgr.get(1), dst);
 
-            if (Core.countNonZero(dst) > 0) {
-                return false;
+                if (Core.countNonZero(dst) > 0) {
+                    return false;
+                }
+
+                absdiff(bgr.get(0), bgr.get(2), dst);
+                return !(Core.countNonZero(dst) > 0);
+            } finally {
+                dst.release();
+                for (Mat channel : bgr) {
+                    channel.release();
+                }
             }
-
-            absdiff(bgr.get(0), bgr.get(2), dst);
-            return !(Core.countNonZero(dst) > 0);
         }
     }
 
@@ -547,25 +560,34 @@ public class DocumentPage {
 
     }
 
-    private void releaseAndNull(Mat mat) {
+    private Mat releaseAndNull(Mat mat) {
         if (mat != null) {
-            mat.release();
-            mat = null;
+            if (mat.dataAddr() != 0) {
+                mat.release();
+            }
+            return null;
         }
+        return null;
     }
 
     public void releaseMat() {
-        releaseAndNull(binaryOtsu);
-        releaseAndNull(grayImage);
-        releaseAndNull(binaryImage);
-        releaseAndNull(binaryImageCrude);
-        releaseAndNull(despeckledImage);
-        releaseAndNull(horizontalWhitespaceImage);
-        releaseAndNull(verticalWhitespaceImage);
-        releaseAndNull(verticalInkImage);
-        releaseAndNull(horizontalInkImage);
-        releaseAndNull(textOnlyImage);
-        releaseAndNull(cannyImage);
-        releaseAndNull(colorizedImage);
+        binaryOtsu = releaseAndNull(binaryOtsu);
+        grayImage = releaseAndNull(grayImage);
+        binaryImage = releaseAndNull(binaryImage);
+        binaryImageCrude = releaseAndNull(binaryImageCrude);
+        despeckledImage = releaseAndNull(despeckledImage);
+        horizontalWhitespaceImage = releaseAndNull(horizontalWhitespaceImage);
+        verticalWhitespaceImage = releaseAndNull(verticalWhitespaceImage);
+        verticalInkImage = releaseAndNull(verticalInkImage);
+        horizontalInkImage = releaseAndNull(horizontalInkImage);
+        textOnlyImage = releaseAndNull(textOnlyImage);
+        cannyImage = releaseAndNull(cannyImage);
+        colorizedImage = releaseAndNull(colorizedImage);
+    }
+
+    @Override
+    public void close() {
+        releaseMat();
+        LOG.debug("Released cached Mats for {}", filename);
     }
 }

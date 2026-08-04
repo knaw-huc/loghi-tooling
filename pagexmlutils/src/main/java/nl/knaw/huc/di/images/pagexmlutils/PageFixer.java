@@ -1,7 +1,10 @@
 package nl.knaw.huc.di.images.pagexmlutils;
 
+
 import nl.knaw.huc.di.images.layoutds.models.Page.PcGts;
 import org.primaresearch.dla.page.io.FileInput;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.xml.transform.TransformerException;
 import java.io.File;
@@ -9,6 +12,7 @@ import java.io.IOException;
 
 public class PageFixer {
 
+    private static final Logger LOG = LoggerFactory.getLogger(PageFixer.class);
     public static void fix(File file, String namespace) throws IOException, TransformerException {
         if (file.isDirectory()) {
             for (File subFile : file.listFiles()) {
@@ -17,7 +21,7 @@ public class PageFixer {
         } else {
             if (file.getName().endsWith(".xml")) {
                 FileInput fileInput = new FileInput(file);
-                System.out.println("fixing file: " + file.getName());
+                LOG.info("fixing file: {}", file.getName());
                 PcGts page = PageUtils.readPageFromFile(file.toPath());
                 PageUtils.writePageToFile(page, namespace, file.toPath());
             }
@@ -34,7 +38,7 @@ public class PageFixer {
         if (args.length > 0) {
             File file = new File(args[0]);
             if (!file.exists()) {
-                System.err.println("file does not exist");
+                LOG.warn("file does not exist");
                 return;
             }
             String namespace = PageUtils.NAMESPACE2019;
@@ -44,7 +48,7 @@ public class PageFixer {
 
             fix(file, namespace);
         } else {
-            System.err.println("Please provide a directory containing pagexml or a pagexml file");
+            LOG.warn("Please provide a directory containing pagexml or a pagexml file");
         }
     }
 }

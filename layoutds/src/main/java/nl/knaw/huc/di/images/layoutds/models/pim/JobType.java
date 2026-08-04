@@ -1,5 +1,9 @@
 package nl.knaw.huc.di.images.layoutds.models.pim;
 
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -51,6 +55,7 @@ public enum JobType {
 
     //    LayoutAnalysis
     private static final Set<JobType> UNUSABLE_JOB_TYPES = Set.of(None, SetSentToElasticSearchNullForDataSet);
+    private static final Logger LOG = LoggerFactory.getLogger(JobType.class);
     public static List<JobType> JOB_TYPES = List.of(JobType.values()).stream()
             .filter(type -> !UNUSABLE_JOB_TYPES.contains(type))
             .collect(Collectors.toList());
@@ -58,7 +63,7 @@ public enum JobType {
 
     private static class Test {
         public static void main(String[] args) {
-            System.out.println(JOB_TYPES.stream().filter(type -> type == HarvestTrpCollection || type == HarvestTrpDocument || type == HarvestTrpPage).map(type -> type+": " + type.ordinal()).collect(Collectors.toSet()));
+            LOG.info("{}", JOB_TYPES.stream().filter(type -> type == HarvestTrpCollection || type == HarvestTrpDocument || type == HarvestTrpPage).map(type -> type + ": " + type.ordinal()).collect(Collectors.toSet()));
         }
     }
 }

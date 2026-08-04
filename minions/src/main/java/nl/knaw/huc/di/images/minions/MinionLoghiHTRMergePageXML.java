@@ -1,6 +1,6 @@
 package nl.knaw.huc.di.images.minions;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import nl.knaw.huc.di.images.imageanalysiscommon.UnicodeToAsciiTranslitirator;
 import nl.knaw.huc.di.images.layoutds.models.HTRConfig;
@@ -11,12 +11,10 @@ import nl.knaw.huc.di.images.pipelineutils.ErrorFileWriter;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
 import org.apache.commons.io.FilenameUtils;
-import org.elasticsearch.common.Strings;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.w3c.dom.Text;
 
 import javax.xml.transform.TransformerException;
 import java.io.BufferedReader;
@@ -30,7 +28,6 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -38,6 +35,7 @@ import java.util.stream.Collectors;
 
 public class MinionLoghiHTRMergePageXML extends BaseMinion implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(MinionLoghiHTRMergePageXML.class);
+    private static final Pattern HTR_MARKER_TAG_PATTERN = Pattern.compile("<u>|</u>|<s>|</s>|<sub>|</sub>|<sup>|</sup>");
     private final Map<String, String> fileTextLineMap;
     private final Map<String, String> batchMetadataMap;
     private final Consumer<PcGts> pageSaver;
@@ -148,19 +146,18 @@ public class MinionLoghiHTRMergePageXML extends BaseMinion implements Runnable {
             return;
         }
 
+        boolean hasMultipleHtrConfigs = htrConfigs.size() > 1;
         for (TextRegion textRegion : page.getPage().getTextRegions()) {
             for (TextLine textLine : textRegion.getTextLines()) {
-                String text = fileTextLineMap.get(pageFileName + "-" + textLine.getId());
+                String textLineKey = pageFileName + "-" + textLine.getId();
+                String text = fileTextLineMap.get(textLineKey);
                 // If text is empty just continue
                 if (text == null) {
                     continue;
                 }
 
                 // If HTML style tags are included revert it back to the unicode equivalents
-                // Pattern to match any of the specific HTML tags
-                String regex = "<u>|</u>|<s>|</s>|<sub>|</sub>|<sup>|</sup>";
-                Pattern pattern = Pattern.compile(regex);
-                if (pattern.matcher(text).find()){
+                if (HTR_MARKER_TAG_PATTERN.matcher(text).find()){
                     // Found Transformer style input string with HTML tags
                     text = StyledString.applyMarkersWithNestedTags(text);
                 }
@@ -182,19 +179,19 @@ public class MinionLoghiHTRMergePageXML extends BaseMinion implements Runnable {
                 String cleanText = styledString.getCleanText();
 
                 // Get confidence score for text line
-                Double confidence = confidenceMap.get(pageFileName + "-" + textLine.getId());
+                Double confidence = confidenceMap.get(textLineKey);
 
                 // Set TextEquiv elements and confidence score
                 textLine.setTextEquiv(new TextEquiv(confidence, unicodeToAsciiTranslitirator.toAscii(cleanText), cleanText));
                 textLine.setWords(new ArrayList<>());
 
                 // Get batch_metadata for line ID
-                String batchMetadata = batchMetadataMap.get(pageFileName + "-" + textLine.getId());
+                String batchMetadata = batchMetadataMap.get(textLineKey);
 
                 // Set custom userAttribute
                 // Either create simple UserAttribute(name, value) or detailed UserAttribute(name, description, type, value)
                 // Only need to do this if we have more than 1 HTRConfigs
-                if (htrConfigs.size() > 1)
+                if (hasMultipleHtrConfigs)
                     textLine.addUserAttributeToUserDefined(new UserAttribute("htrProcessingStep", batchMetadata));
 
                 // Set custom text attribute
@@ -346,7 +343,6 @@ public class MinionLoghiHTRMergePageXML extends BaseMinion implements Runnable {
             if (configWhiteList.contains(key)) {
                 // If the value is another JSONObject and the key is in the whitelist, add its toString representation
                 if (value instanceof JSONObject) {
-                    ObjectMapper mapper = new ObjectMapper();
                     // Add the JSONObject.toString() if the key is directly in the whitelist
                     values.put(key, value.toString().replace("\"", "'"));
                     // Optionally, you can continue to process the nested object as well
@@ -574,9 +570,8 @@ public class MinionLoghiHTRMergePageXML extends BaseMinion implements Runnable {
 
 
         executor.shutdown();
-        while (!executor.isTerminated()) {
-        }
-        System.out.println("Finished all threads");
+
+        LOG.info("Finished all threads");
     }
 
     @Override
@@ -585,7 +580,7 @@ public class MinionLoghiHTRMergePageXML extends BaseMinion implements Runnable {
             this.runFile(this.pageSupplier);
         } catch (IOException e) {
             errorFileWriter.ifPresent(errorFileWriter -> errorFileWriter.write(identifier, e, "Error while processing"));
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         }
     }
 }

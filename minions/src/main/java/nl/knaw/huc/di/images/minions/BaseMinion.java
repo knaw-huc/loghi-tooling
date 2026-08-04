@@ -13,6 +13,8 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -24,10 +26,18 @@ import java.net.URLConnection;
 
 public class BaseMinion {
 
+    private static final Logger LOG = LoggerFactory.getLogger(BaseMinion.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    // SMELL-07: bound the retry loops so a dead server cannot hang/thrash a minion forever.
+    private static final int MAX_RETRIES = 10;
+    private static final long INITIAL_BACKOFF_MS = 500L;
+    private static final long MAX_BACKOFF_MS = 30_000L;
+
 
     private static String serverUri = "http://localhost:9006/";
-    private static String apiKey = "471c6c6c-aee9-485b-9d64-a0a82a2936ba";
-    private static int sleeplength = 1;
+    // SEC-01: no secret in source. Key comes from CLI arg #2 or the LOGHI_API_KEY env var.
+    private static String apiKey = System.getenv("LOGHI_API_KEY");
     public static int maxRandom = 1000;
 
     public static String getServerUri() {
@@ -52,57 +62,55 @@ public class BaseMinion {
     }
 
     public static DocumentImage getDocumentImage(String serverPath) throws IOException, InterruptedException {
-        URL url;
-        String urlString = serverUri + serverPath;
-        url = new URL(urlString);
-        while (true) {
+        final String urlString = serverUri + serverPath;
+        final URL url = new URL(urlString);
+        IOException lastError = null;
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             URLConnection conn = url.openConnection();
             StringBuilder stringBuilder = new StringBuilder();
-            DocumentImage documentImage;
-            try {
-                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(conn.getInputStream(), Charsets.UTF_8));
-                sleeplength = 100;
-
+            try (BufferedReader bufferedReader =
+                         new BufferedReader(new InputStreamReader(conn.getInputStream(), Charsets.UTF_8))) {
                 String inputLine;
                 while ((inputLine = bufferedReader.readLine()) != null) {
                     stringBuilder.append(inputLine);
                 }
-                bufferedReader.close();
-
-                ObjectMapper mapper = new ObjectMapper();
-                documentImage = mapper.readValue(stringBuilder.toString(), DocumentImage.class);
-                return documentImage;
+                return MAPPER.readValue(stringBuilder.toString(), DocumentImage.class);
             } catch (IOException ex) {
-                sleeplength += 500;
-                ex.printStackTrace();
-                Thread.sleep(sleeplength);
+                lastError = ex;
+                long backoff = Math.min(MAX_BACKOFF_MS, INITIAL_BACKOFF_MS * (1L << (attempt - 1)));
+                LOG.warn("getDocumentImage from {} failed (attempt {}/{}), retrying in {} ms",
+                        urlString, attempt, MAX_RETRIES, backoff, ex);
+                Thread.sleep(backoff);
             }
         }
+        throw new IOException("getDocumentImage failed after " + MAX_RETRIES + " attempts: " + urlString, lastError);
     }
 
-    public static OCRJob getOCRJob(String serverPath, String apiKey, OCRJob.OcrSystem ocrSystem) throws InterruptedException {
-        String urlString = serverUri + serverPath + "?ocr=" + ocrSystem;
-        while (true) {
-            OCRJob ocrJob = null;
+    public static OCRJob getOCRJob(String serverPath, String apiKey, OCRJob.OcrSystem ocrSystem)
+            throws InterruptedException, IOException {
+        final String urlString = serverUri + serverPath + "?ocr=" + ocrSystem;
+        IOException lastError = null;
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try (final CloseableHttpClient client = HttpClientBuilder.create().build()) {
                 final String sessionId = logIn(client, serverUri, apiKey);
                 final HttpGet httpGet = new HttpGet(urlString);
                 httpGet.addHeader("Authorization", sessionId);
-
                 try (final CloseableHttpResponse response = client.execute(httpGet)) {
                     if (response.getStatusLine().getStatusCode() == 200) {
-                        ocrJob = new ObjectMapper().readValue(response.getEntity().getContent(), OCRJob.class);
-                    } else {
-                        System.err.println("Could not retrieve OCRJob: " + response.getStatusLine().getReasonPhrase());
+                        return MAPPER.readValue(response.getEntity().getContent(), OCRJob.class);
                     }
+                    LOG.error("Could not retrieve OCRJob: {}", response.getStatusLine().getReasonPhrase());
+                    return null; // non-200 is an application-level "no job", not a transport failure
                 }
-                return ocrJob;
             } catch (IOException ex) {
-                sleeplength += 500;
-                ex.printStackTrace();
-                Thread.sleep(sleeplength);
+                lastError = ex;
+                long backoff = Math.min(MAX_BACKOFF_MS, INITIAL_BACKOFF_MS * (1L << (attempt - 1)));
+                LOG.warn("getOCRJob from {} failed (attempt {}/{}), retrying in {} ms",
+                        urlString, attempt, MAX_RETRIES, backoff, ex);
+                Thread.sleep(backoff);
             }
         }
+        throw new IOException("getOCRJob failed after " + MAX_RETRIES + " attempts: " + urlString, lastError);
     }
 
     public static String logIn(CloseableHttpClient client, String serverUri, String apiKey) throws IOException {
@@ -114,8 +122,7 @@ public class BaseMinion {
                 final Header x_auth_token = execute.getHeaders("X_AUTH_TOKEN")[0];
                 return x_auth_token.getValue();
             } else {
-                System.err.println("Could not login: " + execute.getStatusLine().getReasonPhrase());
-                return null;
+                throw new IllegalStateException("Could not login: " + execute.getStatusLine().getReasonPhrase());
             }
         }
     }
@@ -125,6 +132,11 @@ public class BaseMinion {
     }
 
     public static String getApiKey() {
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                "No API key configured. Pass it as the second CLI argument or set the "
+                + "LOGHI_API_KEY environment variable.");
+        }
         return apiKey;
     }
 

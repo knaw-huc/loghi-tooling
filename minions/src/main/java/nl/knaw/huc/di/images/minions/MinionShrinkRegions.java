@@ -50,10 +50,16 @@ public class MinionShrinkRegions extends BaseMinion implements Runnable, AutoClo
 
             }
         }
-
         executor.shutdown();
-        while (!executor.isTerminated()) {
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.DAYS)) {
+                LOG.warn("Timed out waiting for shrink region workers to finish");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for shrink region workers", e);
         }
+
         LOG.info("All tasks completed.");
     }
 
@@ -99,12 +105,12 @@ public class MinionShrinkRegions extends BaseMinion implements Runnable, AutoClo
             PageUtils.shrinkRegions(this.imageFile, this.pageFile, this.namespace);
             LOG.debug(this.imageFile.toAbsolutePath() + " took " + stopwatch.elapsed(TimeUnit.MILLISECONDS) + " milliseconds");
         } catch (IOException | TransformerException e) {
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         } finally {
             try {
                 this.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                LOG.error("Unexpected error", e);
             }
         }
     }

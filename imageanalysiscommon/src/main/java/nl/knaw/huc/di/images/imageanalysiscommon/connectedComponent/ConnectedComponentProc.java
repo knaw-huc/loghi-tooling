@@ -21,7 +21,7 @@ public class ConnectedComponentProc {
 
     private static int min(int[] neighboringLabels, Map<Integer, Label> allLabels) {
         if (neighboringLabels.length == 0) {
-            return 0; // TODO RUTGERCHECK: is 0 appropriate for empty list
+            return 0; // TEST-06: returns the neutral sentinel 0 because callers never invoke this with an empty input (see callers in this file); the branch is purely defensive.
         }
 
         int returnValue = allLabels.get(neighboringLabels[0]).getRoot().name;
@@ -34,7 +34,7 @@ public class ConnectedComponentProc {
 
     private static int min(List<Pixel> pattern, boolean xOrY) {
         if (pattern.isEmpty()) {
-            return 0; // TODO RUTGERCHECK: is 0 appropriate for empty list
+            return 0; // TEST-06: returns the neutral sentinel 0 because callers never invoke this with an empty input (see callers in this file); the branch is purely defensive.
         }
 
         int ret = (xOrY ? pattern.get(0).x : pattern.get(0).y);
@@ -47,7 +47,7 @@ public class ConnectedComponentProc {
 
     private static int max(List<Pixel> pattern, boolean xOrY) {
         if (pattern.isEmpty()) {
-            return 0; // TODO RUTGERCHECK: is 0 appropriate for empty list
+            return 0; // TEST-06: returns the neutral sentinel 0 because callers never invoke this with an empty input (see callers in this file); the branch is purely defensive.
         }
 
         int ret = (xOrY ? pattern.get(0).x : pattern.get(0).y);

@@ -29,7 +29,7 @@ These are commandline tools that help process the input and output for the Loghi
 | MinionExtractBaselinesStartEndNew3 | Updated rotated line baseline extraction (variant v3) | PAGE XML + baseline + start/end PNGs (new heuristics) |
 | MinionConvertPageToTxt | Convert PAGE XML files to consolidated or line-based text | PAGE XML directory; flags for linebased/plaintext |
 | MinionConvertToPdf | Produce a PDF from JPEG images, overlaying PAGE text at baselines | JPEG images + matching PAGE XML in `page/` subdir |
-| MinionFixPageXML | Normalize/fix PAGE XML; optionally remove text or words | PAGE XML directory; namespace flag (2013/2019) (bug: removetext sets words) |
+| MinionFixPageXML | Normalize/fix PAGE XML; optionally remove text or words | PAGE XML directory; namespace flag (2013/2019) |
 | MinionGarbageCharacterCalculator | Compute percentage of disallowed characters | PAGE XML file + allowed characters file |
 | MinionGeneratePageImages | Synthesize PAGE XML + rendered images from text and fonts | Text files + fonts directory |
 | MinionLoghiHTRMergePageXML | Merge Loghi HTR output lines into existing PAGE XML | PAGE XML + HTR results file + config |
@@ -208,7 +208,6 @@ Example:
 ./target/appassembler/bin/MinionFixPageXML -input_path /data/pagexml -namespace http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15 -removewords
 ```
 
-Known issue: In the current code `-removetext` sets `removeWords` instead of `removeText`. This should be fixed in code for expected behavior.
 
 ### MinionGarbageCharacterCalculator
 This minion returns the characters that should not be in the text as a percentage of total amount of characters.
@@ -496,3 +495,60 @@ These requests are GET requests and could be viewed in your browser.
 
 #### Admin overview
 `http://localhost:8081/`
+---
+## Developer Notes
+### Logging (SMELL-03/SMELL-04)
+All production code uses SLF4J (`org.slf4j.Logger`). Never call `System.out`,
+`System.err`, or `Throwable.printStackTrace()` in non-test code — use parametrised SLF4J:
+```java
+LOG.warn("Failed to process {}: {}", file, message);
+LOG.error("Unexpected error while merging", e);
+```
+### XML factories (SEC-03 / OPT-02 / OPT-03)
+`DocumentBuilderFactory` and `TransformerFactory` are expensive (classpath scanning) and
+are also XXE attack surfaces. The codebase keeps **single, hardened, `static final`**
+instances per module — see:
+* `stringtools/StringTools` — `SECURE_DOCUMENT_BUILDER_FACTORY`, `SECURE_TRANSFORMER_FACTORY`
+* `pagexmlutils/PageUtils` — `SECURE_TRANSFORMER_FACTORY`
+* `layoutanalyzer/LayoutAnalyzer` — `SECURE_TRANSFORMER_FACTORY`
+If you add a new XML factory anywhere, **harden it** with `disallow-doctype-decl=true`,
+disable external entities/parameter-entities, and set
+`ACCESS_EXTERNAL_DTD`/`ACCESS_EXTERNAL_SCHEMA`/`ACCESS_EXTERNAL_STYLESHEET=""`.
+### Jackson mappers (SMELL-06)
+Construct `ObjectMapper` / `XmlMapper` once and cache as `private static final`. They are
+expensive to build and thread-safe to share after construction.
+### OpenCV `Mat` lifecycle (OPT-01 / EXT-MAT-*)
+Native off-heap memory is not reclaimed by the JVM GC. Every `new Mat()` /
+`Imgcodecs.imread(...)` / `someMat.submat(...)` / `.clone()` **must** be matched by a
+`release()` in a `finally` block.
+Two helpers exist in `layoutanalyzer/.../layoutlib/`:
+* **`OpenCVWrapper`** — wraps `Imgcodecs.imread`, `submat`, `clone`, allocation/release
+  behind a synchronised lock so concurrent workers cannot trample the native allocator.
+  **Always** route image reads through `OpenCVWrapper.imread(String filePath)` instead
+  of `Imgcodecs.imread(...)` directly.
+* **`MatScope`** — try-with-resources Mat tracker. Use it whenever a method allocates more
+  than one transient Mat:
+  ```java
+  try (MatScope scope = MatScope.open()) {
+      Mat gray  = scope.track(OpenCVWrapper.imread(path));
+      Mat blur  = scope.track(OpenCVWrapper.newMat());
+      Imgproc.GaussianBlur(gray, blur, ...);
+      // ...
+      // Both Mats are released in LIFO order when the scope is closed,
+      // even on early return / exception.
+  }
+  ```
+The `MatLeakRegressionTest` in `layoutanalyzer/src/test/java/.../MatLeakRegressionTest.java`
+contains 11 regression tests covering MatScope, OpenCVWrapper, double-release detection,
+submat+clone cleanup, stress loops and DocumentPage cache clearing. Add new tests there
+whenever you add a new Mat-owning code path.
+### Test runners
+The `layoutanalyzer` module declares `<forkMode>always</forkMode>` in its Surefire config.
+This is **required** because the OpenCV JNI library cannot be loaded twice in the same
+JVM (`System.loadLibrary` is one-shot), and multiple test classes load the native library
+in `@BeforeClass`. Do not change this without first eliminating the per-class native lib
+load.
+### Joda-Time has been removed
+All four formerly-affected modules now use `java.time`. PageXML timestamps without an
+offset are parsed as **UTC** in order to round-trip exactly with Jackson's UTC default.
+Do not reintroduce `org.joda.time.*`.

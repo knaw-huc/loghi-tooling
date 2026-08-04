@@ -32,6 +32,12 @@ splitPageXMLTextLineIntoWordsResourceExecutorServiceConfig:
   queueLength: ${SPLIT_PAGE_TEXT_LINE_INTO_WORDS_QUEUE_LENGTH:- 50}
   ledgerSize: ${SPLIT_PAGE_TEXT_LINE_INTO_WORDS_LEDGER_SIZE:- 1000000}
 
+extractAndCutExecutorServiceConfig:
+  maxThreads: ${EXTRACT_AND_CUT_MAX_THREADS:- 1}
+  name: ExtractAndCut
+  queueLength: ${EXTRACT_AND_CUT_QUEUE_LENGTH:- 50}
+  ledgerSize: ${EXTRACT_AND_CUT_LEDGER_SIZE:- 1000000}
+
 detectLanguageOfPageXmlResourceExecutorService:
   maxThreads: ${DETECT_LANGUAGE_OF_PAGE_XML_MAX_THREADS:- 1}
   name: DetectLanguageOfPageXml

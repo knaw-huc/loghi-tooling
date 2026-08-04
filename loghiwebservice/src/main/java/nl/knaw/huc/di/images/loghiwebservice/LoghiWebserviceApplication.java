@@ -44,6 +44,7 @@ public class LoghiWebserviceApplication extends Application<LoghiWebserviceConfi
         configuration.registerRecalculateReadingOrderNewResource(environment, metricRegistry);
         configuration.registerSplitPageXMLTextLineIntoWordsResource(environment, metricRegistry);
         configuration.registerDetectLanguageOfPageXmlResource(environment, metricRegistry);
+        configuration.registerExtractAndCutResource(environment, metricRegistry);
 
         configuration.registerSecurity(environment);
 

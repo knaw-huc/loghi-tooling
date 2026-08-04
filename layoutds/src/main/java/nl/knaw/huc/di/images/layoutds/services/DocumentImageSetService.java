@@ -1,5 +1,6 @@
 package nl.knaw.huc.di.images.layoutds.services;
 
+
 import com.google.common.base.Charsets;
 import com.google.common.base.Strings;
 import nl.knaw.huc.di.images.layoutds.DAO.DocumentImageDAO;
@@ -14,9 +15,10 @@ import nl.knaw.huc.di.images.layoutds.models.ElasticSearchIndex;
 import nl.knaw.huc.di.images.layoutds.models.pim.PimUser;
 import nl.knaw.huc.di.images.layoutds.models.pim.Role;
 import nl.knaw.huc.di.images.layoutds.security.PermissionHandler;
-import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.hibernate.Session;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.NoResultException;
 import java.io.IOException;
@@ -29,6 +31,7 @@ import java.util.zip.ZipOutputStream;
 
 public class DocumentImageSetService {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DocumentImageSetService.class);
     private final DocumentImageSetDAO documentImageSetDAO;
     private final BiFunction<Session, UUID, String> remoteUriCreator;
     private final PermissionHandler permissionHandler;
@@ -253,7 +256,7 @@ public class DocumentImageSetService {
                     out.write(data, 0, data.length);
                     out.closeEntry();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    LOG.error("Unexpected error", e);
                 }
             }
         }

@@ -61,7 +61,13 @@ public class MinionShrinkTextLines extends BaseMinion implements Runnable, AutoC
         }
 
         executor.shutdown();
-        while (!executor.isTerminated()) {
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.DAYS)) {
+                LOG.warn("Timed out waiting for shrink textline workers to finish");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for shrink textline workers", e);
         }
         LOG.info("All tasks completed.");
     }
@@ -111,12 +117,12 @@ public class MinionShrinkTextLines extends BaseMinion implements Runnable, AutoC
             PageUtils.shrinkTextLines(this.imageFile, pageFile, namespace);
             LOG.debug(this.imageFile.toAbsolutePath() + " took " + stopwatch.elapsed(TimeUnit.MILLISECONDS) + " milliseconds");
         } catch (IOException | TransformerException e) {
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         } finally {
             try {
                 this.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                LOG.error("Unexpected error", e);
             }
         }
     }

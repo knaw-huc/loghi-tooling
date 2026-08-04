@@ -15,19 +15,18 @@ import nl.knaw.huc.di.images.layoutds.models.DocumentTextLine;
 import nl.knaw.huc.di.images.layoutds.models.Page.*;
 import nl.knaw.huc.di.images.layoutds.models.connectedComponent.ConnectedComponent;
 import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
-import org.opencv.core.Point;
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.w3c.dom.Text;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.StringWriter;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static nl.knaw.huc.di.images.imageanalysiscommon.StringConverter.*;
@@ -43,6 +42,19 @@ public class LayoutProc {
     private static boolean _outputDebug = true;
     private static final int bestBinarizationThreshold = 15;
     private static final int bestBinarizationBlockSize = 51;
+    private static final double SEAM_NO_GO_ENERGY = 1.0e20;
+
+    private static final class TextLineGeometry {
+        private final TextLine textLine;
+        private final List<Point> baselinePoints;
+        private final Rect baselineRect;
+
+        private TextLineGeometry(TextLine textLine, List<Point> baselinePoints) {
+            this.textLine = textLine;
+            this.baselinePoints = baselinePoints;
+            this.baselineRect = getBoundingBox(baselinePoints);
+        }
+    }
 
     public static void setOutputDebug(boolean _outputDebug) {
         LayoutProc._outputDebug = _outputDebug;
@@ -251,7 +263,7 @@ public class LayoutProc {
         int height = input.height();
         byte[] data = new byte[size];
         input.get(0, 0, data);
-        Mat destination = Mat.zeros(height, width, CvType.CV_8UC1);
+        Mat destination = OpenCVWrapper.zeros(new Size(width, height), CvType.CV_8UC1);
         for (int y = 0; y < height; y++) {
             int length = 0;
             for (int x = 0; x < width; x++) {
@@ -541,6 +553,11 @@ public class LayoutProc {
         return Math.max(interlineDistance, minValue);
     }
 
+    private static double interlineMedianFromGeometry(List<TextLineGeometry> textLineGeometries, double minValue) {
+        double interlineDistance = interlineMedianFromGeometry(textLineGeometries);
+        return Math.max(interlineDistance, minValue);
+    }
+
 
 
     public static double findClosestDistance(List<Point> polygon1, List<Point> polygon2) {
@@ -604,6 +621,32 @@ public class LayoutProc {
             allPoints.removeAll(points);
             double distance = findClosestDistance(allPoints, points);
             distances.add(distance);
+        }
+        Statistics statistics = new Statistics(distances);
+        return statistics.median();
+    }
+
+    private static double interlineMedianFromGeometry(List<TextLineGeometry> textLineGeometries) {
+        if (textLineGeometries.size() < 2) {
+            return 0;
+        }
+
+        ArrayList<Double> distances = new ArrayList<>(textLineGeometries.size());
+        for (TextLineGeometry textLineGeometry : textLineGeometries) {
+            double closestDistance = Double.MAX_VALUE;
+            for (TextLineGeometry otherLineGeometry : textLineGeometries) {
+                if (textLineGeometry == otherLineGeometry) {
+                    continue;
+                }
+                closestDistance = Math.min(closestDistance,
+                        findClosestDistance(otherLineGeometry.baselinePoints, textLineGeometry.baselinePoints));
+            }
+            if (closestDistance != Double.MAX_VALUE) {
+                distances.add(closestDistance);
+            }
+        }
+        if (distances.isEmpty()) {
+            return 0;
         }
         Statistics statistics = new Statistics(distances);
         return statistics.median();
@@ -1305,7 +1348,7 @@ public class LayoutProc {
     }
 
     public static Mat darkenImage(String uri) {
-        Mat image = Imgcodecs.imread(uri);
+        Mat image = OpenCVWrapper.imread(uri);
         LayoutConfiguration configuration = new LayoutConfiguration(image);
         LayoutProc.setOutputDebug(false);
         configuration.setOutputFile(false);
@@ -1673,8 +1716,80 @@ public class LayoutProc {
         Mat seamImageResized = OpenCVWrapper.newMat();
         Imgproc.resize(energyMat, seamImageResized, newSize, 0, 0, INTER_NEAREST);
 
-        for (int j = 0; j < seamImageResized.width(); j++) {
-            for (int i = 0; i < seamImageResized.height(); i++) {
+        int height = seamImageResized.height();
+        int width = seamImageResized.width();
+        int type = seamImageResized.type();
+
+        if (type == CV_32F) {
+            calcSeamImageFloat(seamImageResized, height, width);
+        } else if (type == CV_64F) {
+            calcSeamImageDouble(seamImageResized, height, width);
+        } else {
+            // Per-pixel fallback path for any unexpected types. Kept for safety; the
+            // production callers always pass CV_32F.
+            calcSeamImageGeneric(seamImageResized, height, width);
+        }
+
+        Imgproc.resize(seamImageResized, destination, new Size(energyMat.width(), energyMat.height()));
+        seamImageResized = OpenCVWrapper.release(seamImageResized); // Release seamImage
+    }
+
+    private static void calcSeamImageFloat(Mat seamImageResized, int height, int width) {
+        // Bulk-read the entire resized seam image into a single float[] and run the
+        // column-major DP in pure Java. Replaces a nested per-pixel getSafeDouble /
+        // safePut pair (each allocating a fresh float[1]) with two JNI transitions.
+        float[] data = new float[height * width];
+        seamImageResized.get(0, 0, data);
+        for (int j = 0; j < width; j++) {
+            if (j == 0) {
+                // First column has no predecessor; lowest is 0 by definition.
+                for (int i = 0; i < height; i++) {
+                    // data[i*width + j] += 0; no-op.
+                }
+                continue;
+            }
+            int prevCol = j - 1;
+            for (int i = 0; i < height; i++) {
+                int yUp = i > 0 ? i - 1 : 0;
+                int yDn = i + 1 < height ? i + 1 : height - 1;
+                float a = data[yUp * width + prevCol];
+                float b = data[i * width + prevCol];
+                float c = data[yDn * width + prevCol];
+                float lowest = a < b ? a : b;
+                if (c < lowest) lowest = c;
+                int idx = i * width + j;
+                data[idx] = lowest + data[idx];
+            }
+        }
+        seamImageResized.put(0, 0, data);
+    }
+
+    private static void calcSeamImageDouble(Mat seamImageResized, int height, int width) {
+        double[] data = new double[height * width];
+        seamImageResized.get(0, 0, data);
+        for (int j = 0; j < width; j++) {
+            if (j == 0) {
+                continue;
+            }
+            int prevCol = j - 1;
+            for (int i = 0; i < height; i++) {
+                int yUp = i > 0 ? i - 1 : 0;
+                int yDn = i + 1 < height ? i + 1 : height - 1;
+                double a = data[yUp * width + prevCol];
+                double b = data[i * width + prevCol];
+                double c = data[yDn * width + prevCol];
+                double lowest = a < b ? a : b;
+                if (c < lowest) lowest = c;
+                int idx = i * width + j;
+                data[idx] = lowest + data[idx];
+            }
+        }
+        seamImageResized.put(0, 0, data);
+    }
+
+    private static void calcSeamImageGeneric(Mat seamImageResized, int height, int width) {
+        for (int j = 0; j < width; j++) {
+            for (int i = 0; i < height; i++) {
                 double lowest = Double.MAX_VALUE;
                 for (int m = -1; m <= 1; m++) {
                     int y = i + m;
@@ -1682,35 +1797,26 @@ public class LayoutProc {
                     if (y < 0) {
                         y = 0;
                     }
-                    if (y >= seamImageResized.height()) {
-                        y = seamImageResized.height() - 1;
+                    if (y >= height) {
+                        y = height - 1;
                     }
-
                     if (x < 0) {
                         lowest = 0;
                     } else {
-                        double value = getSafeDouble(seamImageResized,y, x);
+                        double value = getSafeDouble(seamImageResized, y, x);
                         if (value < lowest || lowest == Double.MAX_VALUE) {
                             lowest = value;
                         }
                     }
                 }
                 if (lowest == Double.MAX_VALUE) {
-                    LOG.error("Lowest is still Double.MAX_VALUE. i = " + i + " j = " + j + " seamImage.height() = " + seamImageResized.height() + " seamImage.width() = " + seamImageResized.width());
+                    LOG.error("Lowest is still Double.MAX_VALUE. i = " + i + " j = " + j + " seamImage.height() = " + height + " seamImage.width() = " + width);
                     lowest = 0;
-                }
-                if (i >= seamImageResized.height()){
-                    throw new RuntimeException("i: " + i + " j: " + j);
-                }
-                if (j >= seamImageResized.width()){
-                    throw new RuntimeException("i: " + i + " j: " + j);
                 }
                 double putter = lowest + getSafeDouble(seamImageResized, i, j);
                 safePut(seamImageResized, i, j, putter);
             }
         }
-        Imgproc.resize(seamImageResized, destination, new Size(energyMat.width(), energyMat.height()));
-        seamImageResized = OpenCVWrapper.release(seamImageResized); // Release seamImage
     }
 
     public static double getMeanAngle(List<Double> anglesDeg) {
@@ -1789,12 +1895,48 @@ public class LayoutProc {
         return closest;
     }
 
+    private static TextLineGeometry closestLineAbove(TextLineGeometry current, List<TextLineGeometry> textLines) {
+        Rect currentRect = current.baselineRect;
+        TextLineGeometry closest = null;
+        int closestDistance = Integer.MAX_VALUE;
+        for (TextLineGeometry textLine : textLines) {
+            Rect otherRect = textLine.baselineRect;
+            int distance = currentRect.y - otherRect.y;
+            if (otherRect.x + otherRect.width > currentRect.x
+                    && otherRect.x < currentRect.x + currentRect.width
+                    && otherRect.y < currentRect.y
+                    && distance < closestDistance) {
+                closest = textLine;
+                closestDistance = distance;
+            }
+        }
+        return closest;
+    }
+
     public static synchronized TextLine closestLineBelow(TextLine current, List<TextLine> textLines) {
         Rect currentRect = getBoundingBoxBaseLine(current);
         TextLine closest = null;
         int closestDistance = Integer.MAX_VALUE;
         for (TextLine textLine : textLines) {
             Rect otherRect = getBoundingBoxBaseLine(textLine);
+            int distance = otherRect.y - currentRect.y;
+            if (otherRect.x + otherRect.width > currentRect.x
+                    && otherRect.x < currentRect.x + currentRect.width
+                    && otherRect.y > currentRect.y
+                    && distance < closestDistance) {
+                closest = textLine;
+                closestDistance = distance;
+            }
+        }
+        return closest;
+    }
+
+    private static TextLineGeometry closestLineBelow(TextLineGeometry current, List<TextLineGeometry> textLines) {
+        Rect currentRect = current.baselineRect;
+        TextLineGeometry closest = null;
+        int closestDistance = Integer.MAX_VALUE;
+        for (TextLineGeometry textLine : textLines) {
+            Rect otherRect = textLine.baselineRect;
             int distance = otherRect.y - currentRect.y;
             if (otherRect.x + otherRect.width > currentRect.x
                     && otherRect.x < currentRect.x + currentRect.width
@@ -1855,7 +1997,7 @@ public class LayoutProc {
         grayImageInverted = OpenCVWrapper.release(grayImageInverted);
 
         Mat combined = OpenCVWrapper.newMat();
-        OpenCVWrapper.addWeighted(sobel1, sobel2, combined, CV_64F);
+        OpenCVWrapper.addWeighted(sobel1, sobel2, combined, destination.type());
         if (combined.size().width == 0 || combined.size().height == 0) {
             LOG.error("broken combined");
             throw new RuntimeException("broken combined");
@@ -1865,7 +2007,7 @@ public class LayoutProc {
         Mat binary = OpenCVWrapper.newMat(grayImage.size(), CV_8U);
         OpenCVWrapper.adaptiveThreshold(grayImage, binary, 21);
 
-        OpenCVWrapper.addWeighted(combined, binary, combined, CV_64F);
+        OpenCVWrapper.addWeighted(combined, binary, combined, destination.type());
         binary = OpenCVWrapper.release(binary);
 
         OpenCVWrapper.GaussianBlur(combined, destination);
@@ -1875,35 +2017,48 @@ public class LayoutProc {
     private static void drawBaselines(String identifier, List<TextLine> textlines, Mat image, int thickness) {
         for (TextLine textLine : textlines) {
             ArrayList<Point> points = StringConverter.stringToPoint(textLine.getBaseline().getPoints());
-            Point lastPoint = null;
-            Scalar scalar =null;
-            if (image.type() == CV_8UC1) {
-                scalar = new Scalar(255);
-            }else if (image.type() == CV_8UC3) {
-                scalar = new Scalar(255, 255, 255);
-            }else if (image.type()== CV_64F){
-                scalar = new Scalar(255);
-            }else {
-                throw new RuntimeException("Unsupported image type");
+            drawBaseline(identifier, points, image, thickness);
+        }
+    }
+
+    private static void drawBaselinesFromGeometry(String identifier, List<TextLineGeometry> textlines, Mat image, int thickness) {
+        for (TextLineGeometry textLine : textlines) {
+            drawBaseline(identifier, textLine.baselinePoints, image, thickness);
+        }
+    }
+
+    private static void drawBaseline(String identifier, List<Point> points, Mat image, int thickness) {
+        Point lastPoint = null;
+        Scalar scalar;
+        if (image.type() == CV_8UC1) {
+            scalar = new Scalar(255);
+        } else if (image.type() == CV_8UC3) {
+            scalar = new Scalar(255, 255, 255);
+        } else if (image.type() == CV_32F) {
+            scalar = new Scalar(255);
+        } else if (image.type() == CV_64F) {
+            scalar = new Scalar(255);
+        } else {
+            throw new RuntimeException("Unsupported image type");
+        }
+        for (Point point : points) {
+            Point clippedPoint = new Point(point.x, point.y);
+            if (clippedPoint.x < 0) {
+                clippedPoint.x = 0;
             }
-            for (Point point : points) {
-                if (point.x < 0) {
-                    point.x = 0;
-                }
-                if (point.x >= image.width()) {
-                    point.x = image.width() - 1;
-                }
-                if (point.y < 0) {
-                    point.y = 0;
-                }
-                if (point.y >= image.height()) {
-                    point.y = image.height() - 1;
-                }
-                if (lastPoint != null) {
-                    OpenCVWrapper.line(identifier, image, lastPoint, point, scalar, thickness);
-                }
-                lastPoint = point;
+            if (clippedPoint.x >= image.width()) {
+                clippedPoint.x = image.width() - 1;
             }
+            if (clippedPoint.y < 0) {
+                clippedPoint.y = 0;
+            }
+            if (clippedPoint.y >= image.height()) {
+                clippedPoint.y = image.height() - 1;
+            }
+            if (lastPoint != null) {
+                OpenCVWrapper.line(identifier, image, lastPoint, clippedPoint, scalar, thickness);
+            }
+            lastPoint = clippedPoint;
         }
     }
 
@@ -2291,16 +2446,17 @@ public class LayoutProc {
                                                                 int thickness, int minimumBaselineThickness, boolean ignoreBroken) {
         Mat grayImage = OpenCVWrapper.newMat(image.size(), CV_8UC1);
         OpenCVWrapper.cvtColor(image, grayImage);
-        Mat energyImage = new Mat(grayImage.size(), CV_64F);
+        Mat energyImage = new Mat(grayImage.size(), CV_32F);
+//         Mat energyImage = OpenCVWrapper.newMat(grayImage.size(), CV_64F);
 
         energyImage(grayImage, energyImage);
         if (energyImage.size().width == 0 || energyImage.size().height == 0) {
             LOG.error("broken energyImage");
             throw new RuntimeException("broken energyImage");
         }
-        if (energyImage.type() != CV_64F) {
-            LOG.error("energyImage type is not CV_64F, but: " + energyImage.type());
-            throw new RuntimeException("energyImage type is not CV_64F, but: " + energyImage.type());
+        if (energyImage.type() != CV_32F) {
+            LOG.error("energyImage type is not CV_32F, but: " + energyImage.type());
+            throw new RuntimeException("energyImage type is not CV_32F, but: " + energyImage.type());
         }
         List<TextLine> allLines = new ArrayList<>();
         for (TextRegion textRegion : page.getPage().getTextRegions()) {
@@ -2317,13 +2473,27 @@ public class LayoutProc {
         }
         allLines.removeAll(linesToRemove);
 
+        List<TextLineGeometry> allLineGeometries = new ArrayList<>();
+        Map<TextLine, TextLineGeometry> geometryByTextLine = new IdentityHashMap<>();
+        for (TextLine textLine : allLines) {
+            List<Point> baselinePoints = StringConverter.stringToPoint(textLine.getBaseline().getPoints());
+            if (baselinePoints.size() <= 1) {
+                continue;
+            }
+            TextLineGeometry textLineGeometry = new TextLineGeometry(textLine, baselinePoints);
+            allLineGeometries.add(textLineGeometry);
+            geometryByTextLine.put(textLine, textLineGeometry);
+        }
 
-        Mat baselineImage = new Mat(energyImage.size(), CV_64F);
-        energyImage.convertTo(baselineImage, CV_64F);
-        drawBaselines(identifier, allLines, baselineImage, thickness);
+        Mat baselineImage = new Mat(energyImage.size(), energyImage.type());
+        energyImage.copyTo(baselineImage);
+        drawBaselinesFromGeometry(identifier, allLineGeometries, baselineImage, thickness);
+//         Mat baselineImage = OpenCVWrapper.newMat(energyImage.size(), CV_64F);
+//         energyImage.convertTo(baselineImage, CV_64F);
+//         drawBaselines(identifier, allLines, baselineImage, thickness);
 
         int counter = 0;
-        double interlineDistance = LayoutProc.interlineMedian(allLines, minimumInterlineDistance);//94;
+        double interlineDistance = LayoutProc.interlineMedianFromGeometry(allLineGeometries, minimumInterlineDistance);//94;
         LOG.info(identifier + " interline distance: " + interlineDistance);
 
         Stopwatch stopwatch = Stopwatch.createStarted();
@@ -2339,8 +2509,12 @@ public class LayoutProc {
                         throw new RuntimeException("Textline has no baseline: " + textLine.getId());
                     }
                 }
-                counter = recalculateTextLine(identifier, scaleDownFactor, textLine, interlineDistance, stopwatch,
-                        allLines, energyImage, baselineImage, counter, minimumBaselineThickness);
+                TextLineGeometry textLineGeometry = geometryByTextLine.get(textLine);
+                if (textLineGeometry == null) {
+                    continue;
+                }
+                counter = recalculateTextLine(identifier, scaleDownFactor, textLineGeometry, interlineDistance, stopwatch,
+                        allLineGeometries, energyImage, baselineImage, counter, minimumBaselineThickness);
             }
         }
         grayImage = OpenCVWrapper.release(grayImage);
@@ -2352,9 +2526,10 @@ public class LayoutProc {
         }
     }
 
-    private static int recalculateTextLine(String identifier, double scaleDownFactor, TextLine textLine,
-                                           double interlineDistance, Stopwatch stopwatch, List<TextLine> allLines,
+    private static int recalculateTextLine(String identifier, double scaleDownFactor, TextLineGeometry textLineGeometry,
+                                           double interlineDistance, Stopwatch stopwatch, List<TextLineGeometry> allLines,
                                            Mat energyImage, Mat baselineImage, int counter, int minimumBaselineThickness) {
+        TextLine textLine = textLineGeometry.textLine;
         double xHeightBasedOnInterline = interlineDistance / 3;
         if (xHeightBasedOnInterline < (MINIMUM_XHEIGHT)) {
             xHeightBasedOnInterline = (MINIMUM_XHEIGHT);
@@ -2366,13 +2541,13 @@ public class LayoutProc {
         }
         long startTime = stopwatch.elapsed(TimeUnit.MILLISECONDS);
         int xMargin = (int) xHeightBasedOnInterline;
-        List<Point> baseLinePoints = StringConverter.stringToPoint(textLine.getBaseline().getPoints());
+        List<Point> baseLinePoints = textLineGeometry.baselinePoints;
         if (baseLinePoints.size() <= 1) {
             // no base line, use existing textline Coords
             return counter;
         }
-        Rect baselineRect = LayoutProc.getBoundingBox(baseLinePoints);
-        TextLine closestAbove = LayoutProc.closestLineAbove(textLine, allLines);
+        Rect baselineRect = textLineGeometry.baselineRect;
+        TextLineGeometry closestAbove = LayoutProc.closestLineAbove(textLineGeometry, allLines);
         double localInterlineDistance = getLocalInterlineDistance(interlineDistance, baselineRect, null);
 
         double yStartTop = getYStartTop(baseLinePoints, localInterlineDistance);
@@ -2390,8 +2565,10 @@ public class LayoutProc {
             return counter;
         }
         Mat baselineImageSubmat = baselineImage.submat(roi);
+        Mat energyImageSubmat = energyImage.submat(roi);
+        Mat averageMat = new Mat(roi.height, roi.width, energyImage.type(), Core.mean(energyImageSubmat));
+        energyImageSubmat = OpenCVWrapper.release(energyImageSubmat);
 
-        Mat averageMat = new Mat(roi.height, roi.width, CV_64F, Core.mean(energyImage.submat(roi)));
         if (!baselineImageSubmat.size().equals(averageMat.size()) || baselineImageSubmat.type() != averageMat.type()) {
             LOG.error("Matrix dimensions or types are not compatible for subtraction. baselineImageSubmat.size(): " + baselineImageSubmat.size() + " averageMat.size(): " + averageMat.size() + " baselineImageSubmat.type(): " + baselineImageSubmat.type() + " averageMat.type(): " + averageMat.type());
             throw new RuntimeException("Matrix dimensions or types are not compatible for subtraction.");
@@ -2412,7 +2589,7 @@ public class LayoutProc {
             LOG.error("clonedMat: " + clonedMat);
             throw cvException;
         }
-//        baselineImageSubmat = OpenCVWrapper.release(baselineImageSubmat);
+        baselineImageSubmat = OpenCVWrapper.release(baselineImageSubmat);
         averageMat = OpenCVWrapper.release(averageMat);
 
         int newWidth = (int) Math.ceil(clonedMat.width() / scaleDownFactor);
@@ -2424,7 +2601,7 @@ public class LayoutProc {
 
         // no-go area above the baseline closest above this baseline
         if (closestAbove != null) {
-            for (Point point : expandPointList(StringConverter.stringToPoint(closestAbove.getBaseline().getPoints()))) {
+            for (Point point : expandPointList(closestAbove.baselinePoints)) {
                 if (point.x - roi.x < 0 || point.x - roi.x >= clonedMat.width()) {
                     continue;
                 }
@@ -2434,7 +2611,7 @@ public class LayoutProc {
                             clonedMat,
                             new Point(point.x - roi.x, 0),
                             new Point(point.x - roi.x, yTarget),
-                            new Scalar(Float.MAX_VALUE),
+                            new Scalar(SEAM_NO_GO_ENERGY),
                             1);
                 }
             }
@@ -2447,7 +2624,7 @@ public class LayoutProc {
                 Imgproc.line(clonedMat,
                         new Point(point.x - roi.x, point.y - roi.y),
                         new Point(point.x - roi.x, lastPoint.y - roi.y),
-                        new Scalar(Float.MAX_VALUE),
+                        new Scalar(SEAM_NO_GO_ENERGY),
                         baselineThickness);
             }
             lastPoint = point;
@@ -2458,14 +2635,14 @@ public class LayoutProc {
             Imgproc.line(clonedMat,
                     new Point(point.x - roi.x, point.y - roi.y),
                     new Point(point.x - roi.x, clonedMat.height()),
-                    new Scalar(Float.MAX_VALUE),
+                    new Scalar(SEAM_NO_GO_ENERGY),
                     1);
         }
 
 
         LayoutProc.calcSeamImage(clonedMat, newSize, seamImageTop);
-        if (seamImageTop.type()!= CV_64F){
-            LOG.error("seamImageTop.type()!= CV_64F");
+        if (seamImageTop.type()!= energyImage.type()){
+            LOG.error("seamImageTop.type()!= energyImage.type()");
         }
         clonedMat = OpenCVWrapper.release(clonedMat);
         if (seamImageTop.height() <= 2) {
@@ -2512,16 +2689,15 @@ public class LayoutProc {
         }
         roi = new Rect(xStop, (int) yStartTop, xStart - xStop, (int) (yStartBottom - yStartTop));
         Mat tmpSubmat2 = energyImage.submat(roi);
-        Mat average2 = new Mat(roi.size(), CV_8UC1, Core.mean(tmpSubmat2));
-//        tmpSubmat2 = OpenCVWrapper.release(tmpSubmat2);
+        Mat average2 = new Mat(roi.size(), energyImage.type(), Core.mean(tmpSubmat2));
+        tmpSubmat2 = OpenCVWrapper.release(tmpSubmat2);
 
         baselineImageSubmat = baselineImage.submat(roi);
-        Mat cloned2 = new Mat(roi.size(), CV_64F);
-        Core.subtract(baselineImageSubmat, average2, cloned2, Mat.ones(baselineImageSubmat.size(), CV_8UC1), CV_64F);
-//        Mat cloned2 = baselineImageSubmat.clone();
+        Mat cloned2 = new Mat(roi.size(), energyImage.type());
+        Core.subtract(baselineImageSubmat, average2, cloned2);
 
         average2 = OpenCVWrapper.release(average2);
-//        baselineImageSubmat = OpenCVWrapper.release(baselineImageSubmat);
+        baselineImageSubmat = OpenCVWrapper.release(baselineImageSubmat);
 
         List<Point> localPoints = new ArrayList<>();
         for (Point point : baseLinePoints) {
@@ -2547,7 +2723,7 @@ public class LayoutProc {
             lastBaseLinePoint = point;
         }
 
-        TextLine closestBelow = LayoutProc.closestLineBelow(textLine, allLines);
+        TextLineGeometry closestBelow = LayoutProc.closestLineBelow(textLineGeometry, allLines);
 
         int newWidthBottom = (int) Math.ceil(cloned2.width() / scaleDownFactor);
         int newHeightBottom = (int) Math.ceil(cloned2.height() / scaleDownFactor);
@@ -2561,7 +2737,7 @@ public class LayoutProc {
                 Imgproc.line(cloned2,
                         new Point(point.x - roi.x, point.y - roi.y),
                         new Point(point.x - roi.x, lastBaseLinePoint.y - roi.y),
-                        new Scalar(Float.MAX_VALUE),
+                        new Scalar(SEAM_NO_GO_ENERGY),
                         1);
             }
             lastBaseLinePoint = point;
@@ -2572,14 +2748,14 @@ public class LayoutProc {
             Imgproc.line(cloned2,
                     new Point(point.x - roi.x, point.y - roi.y),
                     new Point(point.x - roi.x, 0),
-                    new Scalar(Float.MAX_VALUE),
+                    new Scalar(SEAM_NO_GO_ENERGY),
                     1);
         }
 
 //        no-go area of baseline below this baseline
 
         if (closestBelow != null) {
-            for (Point point : expandPointList(StringConverter.stringToPoint(closestBelow.getBaseline().getPoints()))) {
+            for (Point point : expandPointList(closestBelow.baselinePoints)) {
                 int yTarget = (int) point.y - roi.y;
                 if (yTarget > 0
                         && yTarget < cloned2.height()
@@ -2589,7 +2765,7 @@ public class LayoutProc {
                             cloned2,
                             new Point(point.x - roi.x, yTarget),
                             new Point(point.x - roi.x, cloned2.height()),
-                            new Scalar(Float.MAX_VALUE),
+                            new Scalar(SEAM_NO_GO_ENERGY),
                             baselineThickness);
                 }
             }
@@ -2652,7 +2828,7 @@ public class LayoutProc {
     }
 
     private static RotatedRect getRotatedRect(List<Point> baseLinePoints) {
-        MatOfPoint2f sourceMat = new MatOfPoint2f();
+        MatOfPoint2f sourceMat = OpenCVWrapper.newMatOfPoint2f();
         sourceMat.fromList(baseLinePoints);
 
         RotatedRect rect = Imgproc.minAreaRect(sourceMat);
@@ -2661,9 +2837,9 @@ public class LayoutProc {
     }
 
     private static List<Point> warpPoints(List<Point> points, Mat perspectiveMat) {
-        MatOfPoint2f matOfPoint = new MatOfPoint2f();
+        MatOfPoint2f matOfPoint = OpenCVWrapper.newMatOfPoint2f();
         matOfPoint.fromList(points);
-        MatOfPoint2f matOfPointResult = new MatOfPoint2f();
+        MatOfPoint2f matOfPointResult = OpenCVWrapper.newMatOfPoint2f();
         if (matOfPoint.channels() + 1 != perspectiveMat.cols()) {
             new Exception("matOfPoint.channels()+1 != perspectiveMat.cols()").printStackTrace();
         }
@@ -2697,7 +2873,7 @@ public class LayoutProc {
         Point point4b = new Point(x * Math.cos(radians) - y * Math.sin(radians), x * Math.sin(radians) + y * Math.cos(radians));
         point4b.x += rotatedRect.center.x;
         point4b.y += rotatedRect.center.y;
-        dst = new MatOfPoint2f();
+        dst = OpenCVWrapper.newMatOfPoint2f();
         dst.fromArray(point1b, point2b, point3b, point4b);
         return dst;
     }
@@ -2803,9 +2979,11 @@ public class LayoutProc {
         } else {
 //            Mat tmpSubmat = null;
             try {
-                deskewedSubmat = deskewedImage.submat(cuttingRect).clone();
+                Mat deskewedRoi = deskewedImage.submat(cuttingRect);
+                deskewedSubmat = deskewedRoi.clone();
+                deskewedRoi = OpenCVWrapper.release(deskewedRoi);
             } catch (Exception ex) {
-                ex.printStackTrace();
+                LOG.error("Could not create deskewed submat", ex);
             }
 //            deskewedSubmat = tmpSubmat.clone();
 //            tmpSubmat = OpenCVWrapper.release(tmpSubmat);
@@ -2817,7 +2995,7 @@ public class LayoutProc {
             Point point2a = new Point(image.width() - 1, 0);
             Point point3a = new Point(0, image.height() - 1);
             Point point4a = new Point(image.width() - 1, image.height() - 1);
-            src = new MatOfPoint2f();
+            src = OpenCVWrapper.newMatOfPoint2f();
             src.fromArray(point1a, point2a, point3a, point4a);
             dst = getDestinationMat(rotatedRect, radians, point1a, point2a, point3a, point4a);
 
@@ -2842,11 +3020,11 @@ public class LayoutProc {
                 clonedPoints.add(new Point(point.x - cuttingRect.x, point.y - cuttingRect.y));
             }
 
-            sourceMat = new MatOfPoint();
+            sourceMat = OpenCVWrapper.newMatOfPoint();
             sourceMat.fromList(clonedPoints);
             List<MatOfPoint> finalPoints = new ArrayList<>();
             finalPoints.add(sourceMat);
-            Mat mask = new Mat(cuttingRect.size(), CV_8UC1, new Scalar(0));
+            Mat mask = OpenCVWrapper.newMat(cuttingRect.size(), CV_8UC1, new Scalar(0));
             Scalar color = new Scalar(127);
             Imgproc.fillPoly(mask, finalPoints, color);
             for (int i = 1; i < expandedBaseline.size(); i++) {
@@ -2883,10 +3061,8 @@ public class LayoutProc {
                 try {
                     finalOutput=null;
                     if (toMerge.size() == 3) {
-//                        finalOutput = new Mat(splittedImage.get(0).size(), CV_8UC3);
                         finalOutput = OpenCVWrapper.newMat();
                     }else if (toMerge.size() == 4){
-//                        finalOutput = new Mat(splittedImage.get(0).size(), CV_8UC4);
                         finalOutput = OpenCVWrapper.newMat();
                     }else{
                         throw new RuntimeException("toMerge.size() " + toMerge.size());
@@ -2897,7 +3073,7 @@ public class LayoutProc {
                     OpenCVWrapper.release(splittedImage.get(2));
                     mask = OpenCVWrapper.release(mask);
                 } catch (Exception ex) {
-                    ex.printStackTrace();
+                    LOG.error("Unexpected error", ex);
                     LOG.error("toMerge.size() " + toMerge.size());
                     LOG.error("deskewSubmat.size() " + deskewedSubmat.size());
                     LOG.error("mask.size() " + mask.size());
@@ -2915,7 +3091,7 @@ public class LayoutProc {
     }
 
     public static Mat convertToBinaryImage(Mat grayImage) {
-//        Mat binaryImage = Mat.zeros(new Size(grayImage.height(), grayImage.width()), CvType.CV_8UC1);
+//        Mat binaryImage = Mat.zeros(new Size(grayImage.width(), grayImage.height()), CvType.CV_8UC1);
         Mat binaryImage = OpenCVWrapper.newMat();
         Imgproc.adaptiveThreshold(grayImage, binaryImage, 255, Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY_INV, bestBinarizationBlockSize, bestBinarizationThreshold);
         return binaryImage;
@@ -3105,17 +3281,13 @@ Gets a text line from an image based on the baseline and contours. Text line is 
 
             Mat grayImage = OpenCVWrapper.newMat(deskewedSubmat.size(), CV_8UC1);
             OpenCVWrapper.cvtColor(deskewedSubmat, grayImage);
-            Mat grayImageInverted = OpenCVWrapper.newMat(grayImage.size(), grayImage.type());
-            OpenCVWrapper.bitwise_not(grayImage, grayImageInverted);
-            grayImage = OpenCVWrapper.release(grayImage);
-            Scalar meanGray = Core.mean(grayImageInverted);
-            Mat average = OpenCVWrapper.newMat(grayImageInverted.size(), CV_8UC1, meanGray);
+            OpenCVWrapper.bitwise_not(grayImage, grayImage);
+            Scalar meanGray = Core.mean(grayImage);
             Mat tmpGrayBackgroundSubtracted = OpenCVWrapper.newMat();
-            Core.subtract(grayImageInverted, average, tmpGrayBackgroundSubtracted);
-            average = OpenCVWrapper.release(average);
-            grayImageInverted = OpenCVWrapper.release(grayImageInverted);
+            Core.subtract(grayImage, meanGray, tmpGrayBackgroundSubtracted);
+            grayImage = OpenCVWrapper.release(grayImage);
 
-            Mat maskedBinary = new Mat(mask.rows(), mask.cols(), mask.type());
+            Mat maskedBinary = OpenCVWrapper.newMat(new Size(mask.cols(), mask.rows()), mask.type());
             tmpGrayBackgroundSubtracted.copyTo(maskedBinary, mask);
             tmpGrayBackgroundSubtracted = OpenCVWrapper.release(tmpGrayBackgroundSubtracted);
 
@@ -3153,37 +3325,45 @@ Gets a text line from an image based on the baseline and contours. Text line is 
     }
 
     private static void getMaskedOutput(String identifier, Integer xHeight, boolean includeMask, Mat deskewedSubmat, Mat mask, int medianY, Mat destination) {
-        List<Mat> splittedImage = new ArrayList<>();
-        Core.split(deskewedSubmat, splittedImage);
+        if (mask.height() != deskewedSubmat.height()) {
+            LOG.error("mask.height()!= deskewedSubmat.height()");
+        }
+        if (mask.width() != deskewedSubmat.width()) {
+            LOG.error("mask.width()!= deskewedSubmat.width()");
+        }
+        if (mask.channels() != 1) {
+            new Exception(" mask.channels() != 1").printStackTrace();
+        }
+        if (mask.type() != CV_8UC1) {
+            new Exception(" mask.type() != CV_8UC1").printStackTrace();
+        }
+
+        Mat finalOutput = null;
         Mat finalFinalOutputTmp = null;
-        List<Mat> toMerge = null;
-
+        boolean ownsFinalOutput = false;
+        MatOfInt fromTo = null;
         try {
-            if (mask.height()!= deskewedSubmat.height()){
-                LOG.error("mask.height()!= deskewedSubmat.height()");
-            }
-            if (mask.width()!= deskewedSubmat.width()){
-                LOG.error("mask.width()!= deskewedSubmat.width()");
+            if (includeMask) {
+                // Build the BGRA result in a single mixChannels pass: BGR comes from
+                // deskewedSubmat (channels 0-2), alpha from mask (channel 3 of the
+                // concatenated input list). This replaces a Core.split / Core.merge
+                // round-trip that allocated 3 single-channel scratch Mats per line.
+                finalOutput = new Mat(deskewedSubmat.size(), CV_8UC4);
+                ownsFinalOutput = true;
+                fromTo = new MatOfInt(0, 0, 1, 1, 2, 2, 3, 3);
+                if (mask.channels() != 1) {
+                    new Exception(" mask.channels() != 1").printStackTrace();
+                }
+                if (mask.type() != CV_8UC1) {
+                    new Exception(" mask.type() != CV_8UC1").printStackTrace();
+                }
+
+                Core.mixChannels(Arrays.asList(deskewedSubmat, mask), Arrays.asList(finalOutput), fromTo);
+            } else {
+                // No alpha needed: the deskewed BGR Mat is the final output already.
+                finalOutput = deskewedSubmat;
             }
 
-            if (includeMask) {
-                toMerge = Arrays.asList(splittedImage.get(0), splittedImage.get(1), splittedImage.get(2), mask);//, mask);
-            } else {
-                toMerge = Arrays.asList(splittedImage.get(0), splittedImage.get(1), splittedImage.get(2));//, mask);
-            }
-            if (mask.channels() != 1) {
-                new Exception(" mask.channels() != 1").printStackTrace();
-            }
-            if (mask.type() != CV_8UC1) {
-                new Exception(" mask.type() != CV_8UC1").printStackTrace();
-            }
-            Mat finalOutput=null;
-            if (toMerge.size() == 3) {
-                finalOutput = new Mat(toMerge.get(0).size(), CV_8UC3);
-            }else{
-                finalOutput = new Mat(toMerge.get(0).size(), CV_8UC4);
-            }
-            OpenCVWrapper.merge(toMerge, finalOutput);
             int rowStart = medianY - 2 * xHeight;
             if (rowStart < 0) {
                 rowStart = 0;
@@ -3201,17 +3381,17 @@ Gets a text line from an image based on the baseline and contours. Text line is 
             finalFinalOutputTmp.copyTo(destination);
 
         } catch (Exception ex) {
-            ex.printStackTrace();
-            LOG.error(identifier + ": toMerge.size() " + toMerge.size());
+            LOG.error("Unexpected error", ex);
             LOG.error(identifier + ": deskewSubmat.size() " + deskewedSubmat.size());
             LOG.error(identifier + ": mask.size() " + mask.size());
             new Exception("here").printStackTrace();
-        }finally {
+        } finally {
             finalFinalOutputTmp = OpenCVWrapper.release(finalFinalOutputTmp);
-            for (Mat mat : splittedImage) {
-                if (mat != null) {
-                    OpenCVWrapper.release(mat);
-                }
+            if (ownsFinalOutput && finalOutput != null) {
+                OpenCVWrapper.release(finalOutput);
+            }
+            if (fromTo != null) {
+                OpenCVWrapper.release(fromTo);
             }
         }
     }
@@ -3219,7 +3399,9 @@ Gets a text line from an image based on the baseline and contours. Text line is 
     private static BinaryLineStrip getBinaryLineStripFromContours(Mat image, List<Point> contourPoints) {
         BinaryLineStrip binaryLineStrip = new BinaryLineStrip();
         Rect boundingBox = LayoutProc.getBoundingBox(contourPoints);
-        Mat lineStripSubmat = image.submat(boundingBox).clone();
+        Mat lineStripRoi = image.submat(boundingBox);
+        Mat lineStripSubmat = lineStripRoi.clone();
+        lineStripRoi = OpenCVWrapper.release(lineStripRoi);
         binaryLineStrip.setLineStrip(lineStripSubmat);
         binaryLineStrip.setxHeight(lineStripSubmat.height()/3);
         return binaryLineStrip;
@@ -3471,23 +3653,12 @@ Gets a text line from an image based on the baseline and contours. Text line is 
 
                         final double baselineLength = StringConverter.calculateBaselineLength(baselinePoints);
 
+                        List<String> words = splitWordsOnSpace(text);
                         int numchars = 0;
-                        int spaces = 0;
-                        String[] splitted = text.split(" ");
-                        boolean skipInitialSpace = true;
-                        for (final String wordString : splitted) {
-                            if (Strings.isNullOrEmpty(wordString)) {
-                                continue;
-                            }
+                        for (final String wordString : words) {
                             numchars += wordString.length();
-                            if (skipInitialSpace) {
-                                skipInitialSpace = false;
-                                continue;
-                            } else {
-                                // add a space
-                                spaces++;
-                            }
                         }
+                        int spaces = Math.max(0, words.size() - 1);
                         double charWidth = baselineLength / (numchars + spaces);
                         if (charWidth < 2) {
                             textLinesToRemove.add(textLine);
@@ -3499,26 +3670,30 @@ Gets a text line from an image based on the baseline and contours. Text line is 
                         // FIXME see TI-541
                         final int magicValueForYHigherThanWord = 35;
                         final int magicValueForYLowerThanWord = 10;
-                        StringBuilder currentSentence = new StringBuilder();
-                        List<Point> sentenceBaselinePoints = new ArrayList<>();
-                        for (final String wordString : splitted) {
-                            if (Strings.isNullOrEmpty(wordString)) {
-                                continue;
-                            }
+                        int currentSentenceLength = 0;
+                        double sentenceBaselineLength = 0;
+                        Point lastSentenceBaselinePoint = null;
+                        for (final String wordString : words) {
                             Word word = new Word();
                             word.setTextEquiv(new TextEquiv(null, UNICODE_TO_ASCII_TRANSLITIRATOR.toAscii(wordString), wordString));
                             List<Point> wordBaselinePoints = new ArrayList<>();
 
                             double wordLength = wordString.length() * charWidth;
                             Point nextBaselinePoint;
+                            Point previousWordBaselinePoint = null;
+                            double wordBaselineLength = 0;
                             // FIXME Something goes wrong when wordBaseLinePoints is larger than wordLength
 //                            0.1 is added to avoid rounding errors
-                            while (StringConverter.calculateBaselineLength(wordBaselinePoints) + 0.1 < wordLength) {
+                            while (wordBaselineLength + 0.1 < wordLength) {
                                 if (nextBaseLinePointIndex >= baselinePoints.size()) {
                                     break;
                                 }
                                 nextBaselinePoint = baselinePoints.get(nextBaseLinePointIndex);
+                                if (previousWordBaselinePoint != null) {
+                                    wordBaselineLength += StringConverter.distance(previousWordBaselinePoint, nextBaselinePoint);
+                                }
                                 wordBaselinePoints.add(nextBaselinePoint);
+                                previousWordBaselinePoint = nextBaselinePoint;
                                 nextBaseLinePointIndex++;
                             }
 
@@ -3528,12 +3703,21 @@ Gets a text line from an image based on the baseline and contours. Text line is 
                                     magicValueForYLowerThanWord, wordString, wordBaselinePoints);
                             word.setCoords(wordCoords);
                             textLine.getWords().add(word);
-                            sentenceBaselinePoints.addAll(wordBaselinePoints);
-                            currentSentence.append(wordString);
-                            while (nextBaseLinePointIndex + 1 < baselinePoints.size() && StringConverter.calculateBaselineLength(sentenceBaselinePoints) < charWidth * (currentSentence.length()+1)) {
-                                sentenceBaselinePoints.add(baselinePoints.get(++nextBaseLinePointIndex));
+                            for (Point wordBaselinePoint : wordBaselinePoints) {
+                                if (lastSentenceBaselinePoint != null) {
+                                    sentenceBaselineLength += StringConverter.distance(lastSentenceBaselinePoint, wordBaselinePoint);
+                                }
+                                lastSentenceBaselinePoint = wordBaselinePoint;
                             }
-                            currentSentence.append(" ");
+                            currentSentenceLength += wordString.length();
+                            while (nextBaseLinePointIndex + 1 < baselinePoints.size() && sentenceBaselineLength < charWidth * (currentSentenceLength + 1)) {
+                                Point sentenceBaselinePoint = baselinePoints.get(++nextBaseLinePointIndex);
+                                if (lastSentenceBaselinePoint != null) {
+                                    sentenceBaselineLength += StringConverter.distance(lastSentenceBaselinePoint, sentenceBaselinePoint);
+                                }
+                                lastSentenceBaselinePoint = sentenceBaselinePoint;
+                            }
+                            currentSentenceLength++;
                         }
                     }
                 }
@@ -3554,6 +3738,27 @@ Gets a text line from an image based on the baseline and contours. Text line is 
         metadataItem.setValue("loghi-htr-tooling");
 
         page.getMetadata().getMetadataItems().add(metadataItem);
+    }
+
+    private static List<String> splitWordsOnSpace(String text) {
+        List<String> words = new ArrayList<>();
+        int length = text.length();
+        int start = 0;
+        while (start < length) {
+            while (start < length && text.charAt(start) == ' ') {
+                start++;
+            }
+            if (start >= length) {
+                break;
+            }
+            int end = start + 1;
+            while (end < length && text.charAt(end) != ' ') {
+                end++;
+            }
+            words.add(text.substring(start, end));
+            start = end + 1;
+        }
+        return words;
     }
 
     private static Coords getWordCoords(Integer maxY, Integer maxX, TextLine textLine, String text, int magicValueForYHigherThanWord, int magicValueForYLowerThanWord, String wordString, List<Point> wordBaselinePoints) {
@@ -3619,13 +3824,19 @@ Gets a text line from an image based on the baseline and contours. Text line is 
         if (mat.channels()>1){
             throw new RuntimeException("Mat has more than 1 channel, data is single channel");
         }
-        if (mat.type() != CV_64F) {
-            throw new RuntimeException("Mat type is not CV_64F but of type: " + mat.type());
+        if (mat.type() != CV_64F && mat.type() != CV_32F) {
+            throw new RuntimeException("Mat type is not CV_64F/CV_32F but of type: " + mat.type());
         }
         if (i>=0 && i<mat.height() && j>=0 && j<mat.width()){
-            double[] dataDouble = new double[1];
-            dataDouble[0] = data;
-            mat.put(i, j, dataDouble);
+            if (mat.type() == CV_64F) {
+                double[] dataDouble = new double[1];
+                dataDouble[0] = data;
+                mat.put(i, j, dataDouble);
+            } else {
+                float[] dataFloat = new float[1];
+                dataFloat[0] = (float) data;
+                mat.put(i, j, dataFloat);
+            }
         }else{
             LOG.error("Trying to put data outside of mat: " + i + " " + j);
             throw new RuntimeException("writing outside bounds");
@@ -3665,11 +3876,16 @@ Gets a text line from an image based on the baseline and contours. Text line is 
         if (mat.channels()>1){
             throw new RuntimeException("Mat has more than 1 channel, data is single channel");
         }
-        if (mat.type() != CV_64F){
-            throw new RuntimeException("Mat type is not CV_64F but of type: " + mat.type());
+        if (mat.type() != CV_64F && mat.type() != CV_32F){
+            throw new RuntimeException("Mat type is not CV_64F/CV_32F but of type: " + mat.type());
         }
         if (i>=0 && i<mat.height() && j>=0 && j<mat.width()){
-            final double[] data = new double[1];
+            if (mat.type() == CV_64F) {
+                final double[] data = new double[1];
+                mat.get(i, j, data);
+                return data[0];
+            }
+            final float[] data = new float[1];
             mat.get(i, j, data);
             return data[0];
         }else{
@@ -3772,7 +3988,7 @@ Gets a text line from an image based on the baseline and contours. Text line is 
             Mat centroids = OpenCVWrapper.newMat();
             Mat labeled = OpenCVWrapper.newMat(baselineMat.size(), CV_32S);
             // convert Mat to 8U
-            Mat baselineMat8U = new Mat(baselineMat.size(), CV_8UC1);
+            Mat baselineMat8U = OpenCVWrapper.newMat(baselineMat.size(), CV_8UC1);
 //            convert all non zero values to 255
             convertToBinaryImage(baselineMat, baselineMat8U);
             int numLabels = OpenCVWrapper.connectedComponentsWithStats(baselineMat8U, labeled, stats, centroids, 4, CvType.CV_32S);
@@ -3790,7 +4006,9 @@ Gets a text line from an image based on the baseline and contours. Text line is 
             for (int i = 1; i < numLabels; i++) {
                 Rect rect = LayoutProc.getRectFromStats(stats, i);
                 Point newOffsetPoint = new Point(rect.x + offsetPoint.x, rect.y + offsetPoint.y);
-                Mat labeledSubmat = labeled.submat(rect).clone();
+                Mat labeledRoi = labeled.submat(rect);
+                Mat labeledSubmat = labeledRoi.clone();
+                labeledRoi = OpenCVWrapper.release(labeledRoi);
                 // relabel
                 for (int j = 0; j < labeledSubmat.width(); j++) {
                     for (int k = 0; k < labeledSubmat.height(); k++) {

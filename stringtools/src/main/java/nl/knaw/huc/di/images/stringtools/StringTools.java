@@ -1,6 +1,8 @@
 package nl.knaw.huc.di.images.stringtools;
 
 import com.cedarsoftware.util.StringUtilities;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.util.Strings;
 import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -11,6 +13,7 @@ import org.w3c.dom.Document;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -30,12 +33,56 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class StringTools {
+    private static final Logger LOG = LogManager.getLogger(StringTools.class);
     public final static Charset CHARSET_UTF8 = StandardCharsets.UTF_8;
     public static final Charset ISO885915 = Charset.forName("ISO-8859-15");
 
     private final static TreeMap<Integer, String> map = new TreeMap<>();
     static final HashMap<String, Integer> months;
     private static Pattern romanNumeralPattern = null;
+
+    /**
+     * Shared, XXE-hardened {@link DocumentBuilderFactory}. JAXP factories are expensive to construct
+     * (they scan the classpath for providers) but are thread-safe to share — only
+     * {@link DocumentBuilderFactory#newDocumentBuilder()} must be called per thread.
+     */
+    private static final DocumentBuilderFactory SECURE_DOCUMENT_BUILDER_FACTORY = buildSecureDocumentBuilderFactory();
+    /**
+     * Shared, XXE-hardened {@link TransformerFactory} — see {@link #SECURE_DOCUMENT_BUILDER_FACTORY}.
+     */
+    private static final TransformerFactory SECURE_TRANSFORMER_FACTORY = buildSecureTransformerFactory();
+
+    private static DocumentBuilderFactory buildSecureDocumentBuilderFactory() {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            factory.setExpandEntityReferences(false);
+            factory.setXIncludeAware(false);
+            return factory;
+        } catch (ParserConfigurationException e) {
+            throw new IllegalStateException("Unable to create XXE-hardened DocumentBuilderFactory", e);
+        }
+    }
+
+    private static TransformerFactory buildSecureTransformerFactory() {
+        TransformerFactory transformerFactory = TransformerFactory.newInstance();
+        transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
+        return transformerFactory;
+    }
+
+    private static DocumentBuilderFactory createSecureDocumentBuilderFactory() {
+        return SECURE_DOCUMENT_BUILDER_FACTORY;
+    }
+
+    private static TransformerFactory createSecureTransformerFactory() {
+        return SECURE_TRANSFORMER_FACTORY;
+    }
 
     static {
         months = new HashMap<>();
@@ -206,7 +253,7 @@ public class StringTools {
     }
 
     public static org.w3c.dom.Document loadXMLFromString(String xml) throws ParserConfigurationException, IOException, SAXException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilderFactory factory = createSecureDocumentBuilderFactory();
         DocumentBuilder builder = factory.newDocumentBuilder();
         InputSource is = new InputSource(new StringReader(xml));
         return builder.parse(is);
@@ -217,12 +264,12 @@ public class StringTools {
             DOMSource domSource = new DOMSource(doc);
             StringWriter writer = new StringWriter();
             StreamResult result = new StreamResult(writer);
-            TransformerFactory tf = TransformerFactory.newInstance();
+            TransformerFactory tf = createSecureTransformerFactory();
             Transformer transformer = tf.newTransformer();
             transformer.transform(domSource, result);
             return writer.toString();
         } catch (TransformerException ex) {
-            ex.printStackTrace();
+            LOG.error("Could not serialize XML document", ex);
             return null;
         }
     }
@@ -255,7 +302,7 @@ public class StringTools {
             }
             return result;
         } catch (java.nio.charset.MalformedInputException e) {
-            System.err.println("Malformed input (encoding issue) in file: " + path);
+            LOG.error("Malformed input (encoding issue) in file: {}", path, e);
             throw e;
         }
     }
@@ -367,12 +414,16 @@ public class StringTools {
     }
 
     public static Integer getInt(String source) {
-        Integer result = null;
-        try {
-            result = Integer.parseInt(source);
-        } catch (Exception ignored) {
+        if (source == null) {
+            return null;
         }
-        return result;
+        try {
+            return Integer.parseInt(source.trim());
+        } catch (NumberFormatException ex) {
+            // intentional: null sentinel signals "not an integer" to callers
+            LOG.debug("getInt: '{}' is not an integer", source);
+            return null;
+        }
     }
 
     public static void splitPdf(String filepath, String outputPath, String baseOutputFilename) {
@@ -389,7 +440,7 @@ public class StringTools {
             Iterator<PDDocument> iterator = Pages.listIterator();
 
             if (!new File(outputPath).exists() && !new File(outputPath).mkdirs()) {
-                System.err.println("unable to create directory");
+                LOG.error("unable to create directory: {}", outputPath);
             }
 
             if (!outputPath.endsWith("/")) {
@@ -405,7 +456,7 @@ public class StringTools {
             }
 
         } catch (IOException e) {
-            System.err.println("Exception while trying to read pdf document - " + e);
+            LOG.error("Exception while trying to read pdf document", e);
         }
     }
 
@@ -415,7 +466,7 @@ public class StringTools {
 
 
             if (!new File(outputPath).exists() && !new File(outputPath).mkdirs()) {
-                System.err.println("unable to create directory");
+                LOG.error("unable to create directory: {}", outputPath);
             }
 
             if (!outputPath.endsWith("/")) {
@@ -428,7 +479,7 @@ public class StringTools {
                 ImageIOUtil.writeImage(bufferedImage, fileName, 300, 0.90f);
             }
         } catch (IOException e) {
-            System.err.println("Exception while trying to create pdf document - " + e.getMessage());
+            LOG.error("Exception while trying to create pdf document", e);
             return "Exception while trying to create pdf document - " + e.getMessage();
         }
         return "";
@@ -468,19 +519,20 @@ public class StringTools {
                 }
             }
         }
-        System.out.print(matches);
+        LOG.debug("Word matches: {}", matches);
         return 1 - (double) matches / (double) splittedGroundTruth.length;
     }
 
     public static Document convertStringToXMLDocument(String xmlString) {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        DocumentBuilderFactory factory;
 
         DocumentBuilder builder;
         try {
+            factory = createSecureDocumentBuilderFactory();
             builder = factory.newDocumentBuilder();
             return builder.parse(new InputSource(new StringReader(xmlString)));
         } catch (Exception e) {
-            e.printStackTrace();
+            LOG.error("Could not convert XML string to document", e);
         }
         return null;
     }

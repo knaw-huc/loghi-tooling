@@ -1,11 +1,15 @@
 package nl.knaw.huc.di.images.layoutds.DAO;
 
-import com.google.common.io.Files;
+
 import nl.knaw.huc.di.images.layoutds.SessionFactorySingleton;
-import nl.knaw.huc.di.images.layoutds.models.DocumentImageSet;
-import nl.knaw.huc.di.images.layoutds.models.pim.*;
+import nl.knaw.huc.di.images.layoutds.models.pim.Acl;
+import nl.knaw.huc.di.images.layoutds.models.pim.IPimObject;
+import nl.knaw.huc.di.images.layoutds.models.pim.PimGroup;
+import nl.knaw.huc.di.images.layoutds.models.pim.PimUser;
 import org.hibernate.Session;
 import org.hibernate.Transaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.TypedQuery;
 import javax.persistence.criteria.*;
@@ -13,10 +17,11 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.math.BigInteger;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
 public abstract class GenericDAO<T extends IPimObject> {
-    private static Random random = null;
+    private static final Logger LOG = LoggerFactory.getLogger(GenericDAO.class);
     final Class<T> typeParameterClass;
 
     public GenericDAO(Class<T> typeParameterClass) {
@@ -24,10 +29,7 @@ public abstract class GenericDAO<T extends IPimObject> {
     }
 
     public static Random getRandom() {
-        if (random == null) {
-            random = new Random();
-        }
-        return random;
+        return ThreadLocalRandom.current();
     }
 
     public List<T> getAll(Session session) {
@@ -103,7 +105,7 @@ public abstract class GenericDAO<T extends IPimObject> {
                     valid = (boolean) result;
 
                 } catch (IllegalAccessException | NoSuchMethodException | InvocationTargetException e) {
-                    e.printStackTrace();
+                    LOG.error("Unexpected error", e);
                 }
                 break;
             }

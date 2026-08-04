@@ -1,9 +1,12 @@
 package nl.knaw.huc.di.images.layoutds.models;
 
+
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.base.Strings;
 import nl.knaw.huc.di.images.layoutds.models.pim.IPimObject;
 import org.hibernate.annotations.Type;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.*;
 import javax.xml.bind.annotation.XmlRootElement;
@@ -20,6 +23,7 @@ import java.util.UUID;
 @Entity
 @XmlRootElement
 public class Environment implements IPimObject {
+    private static final Logger LOG = LoggerFactory.getLogger(Environment.class);
     public Environment() {
         this.uuid = UUID.randomUUID();
     }
@@ -102,7 +106,7 @@ public class Environment implements IPimObject {
                 url = new URL(getAddress());
                 domain = url.getHost();
             } catch (MalformedURLException e) {
-                e.printStackTrace();
+                LOG.error("Unexpected error", e);
             }
         }
         return domain;

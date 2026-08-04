@@ -9,27 +9,29 @@ import nl.knaw.huc.di.images.layoutds.models.Page.PcGts;
 import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.w3c.dom.ls.LSInput;
 import org.w3c.dom.ls.LSResourceResolver;
+import org.xml.sax.SAXException;
 
 import javax.xml.XMLConstants;
 import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.Schema;
 import javax.xml.validation.SchemaFactory;
 import javax.xml.validation.Validator;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.Reader;
-import java.io.StringReader;
+import java.io.*;
 import java.net.URL;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Locale;
-import org.xml.sax.SAXException;
 
 
 
 public class MinionConvertOCRResult extends BaseMinion {
+    private static final Logger LOG = LoggerFactory.getLogger(MinionConvertOCRResult.class);
+    private static final XmlMapper XML_MAPPER = new XmlMapper();
 
     /**
      * Resolves ALTO/XLink schema imports from the classpath.
@@ -171,11 +173,11 @@ public class MinionConvertOCRResult extends BaseMinion {
             URL xlinkXsd = MinionConvertOCRResult.class.getResource("/xlink.xsd");
 
             if (altoXsd == null) {
-                System.err.println("ALTO XSD not found on classpath: `alto.xsd`");
+                LOG.error("ALTO XSD not found on classpath: `alto.xsd`");
                 return false;
             }
             if (xlinkXsd == null) {
-                System.err.println("XLink XSD not found on classpath: `xlink.xsd` (required for xlink:simpleLink)");
+                LOG.error("XLink XSD not found on classpath: `xlink.xsd` (required for xlink:simpleLink)");
                 return false;
             }
 
@@ -186,7 +188,7 @@ public class MinionConvertOCRResult extends BaseMinion {
             Schema schema;
             try (InputStream alto = MinionConvertOCRResult.class.getResourceAsStream("/alto.xsd")) {
                 if (alto == null) {
-                    System.err.println("ALTO XSD not found on classpath: `alto.xsd`");
+                    LOG.error("ALTO XSD not found on classpath: `alto.xsd`");
                     return false;
                 }
                 schema = schemaFactory.newSchema(new StreamSource(alto, altoXsd.toExternalForm()));
@@ -195,17 +197,17 @@ public class MinionConvertOCRResult extends BaseMinion {
             Validator validator = schema.newValidator();
             validator.validate(new StreamSource(new StringReader(xml)));
 
-            System.out.println("ALTO XML is valid.");
+            LOG.info("ALTO XML is valid.");
             return true;
         } catch (SAXException | IOException e) {
-            System.err.println("ALTO XML validation error: " + e.getMessage());
+            LOG.error("ALTO XML validation error: {}", e.getMessage());
             return false;
         }
     }
 
     public static String detectFileFormatContents(String content) {
         if (content == null || content.isEmpty()) {
-            System.err.println("Content is empty or null");
+            LOG.error("Content is empty or null");
             return null;
         }
         if (content.startsWith("<?xml")) {
@@ -218,7 +220,7 @@ public class MinionConvertOCRResult extends BaseMinion {
             // If it starts with a tag, we assume it's XML
             content = content.trim();
         } else {
-            System.err.println("Content does not start with XML declaration or tag");
+            LOG.error("Content does not start with XML declaration or tag");
             return null;
         }
 
@@ -228,7 +230,7 @@ public class MinionConvertOCRResult extends BaseMinion {
             } else if (content.contains("http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15")) {
                 return "pagexml2019";
             } else {
-                System.err.println("Unknown PageXML version in content");
+                LOG.error("Unknown PageXML version in content");
                 return null;
             }
         } else if (content.startsWith("<alto")) {
@@ -246,7 +248,7 @@ public class MinionConvertOCRResult extends BaseMinion {
         } else if (filename.toLowerCase().endsWith("hocr")) {
             return "hocr";
         } else {
-            System.err.println("Unknown file format for: " + filename);
+            LOG.error("Unknown file format for: {}", filename);
             return null;
         }
     }
@@ -263,7 +265,7 @@ public class MinionConvertOCRResult extends BaseMinion {
         try {
             cmd = parser.parse(options, args);
         } catch (ParseException e) {
-            System.err.println("Error parsing arguments: " + e.getMessage());
+            LOG.error("Error parsing arguments: {}", e.getMessage());
             new HelpFormatter().printHelp("MinionConvertOCRResult", options);
             return;
         }
@@ -288,14 +290,14 @@ public class MinionConvertOCRResult extends BaseMinion {
                 inputDir = new File(inputPath);
                 files = inputDir.listFiles();
                 if (files == null) {
-                    System.err.println("Input path does not exist or is not a directory: " + inputPath);
+                    LOG.error("Input path does not exist or is not a directory: {}", inputPath);
                     return;
                 }
                 for (File file : files) {
                     if (file.isFile()) {
                         String sourceFormat = detectFileFormat(file.getAbsolutePath());
                         if (sourceFormat == null) {
-                            System.err.println("Skipping file with unknown format: " + file.getAbsolutePath());
+                            LOG.warn("Skipping file with unknown format: {}", file.getAbsolutePath());
                         } else if (sourceFormat.equals("pagexml2013")) {
 //                            String pageXml = StringTools.readFile(file.getAbsolutePath());
 //                            PcGts page = Generator.convertPageXml2013ToPageXml2019(pageXml);
@@ -308,17 +310,16 @@ public class MinionConvertOCRResult extends BaseMinion {
 //                            StringTools.writeFile(outputFile, pageXml2019);
                         } else if (sourceFormat.equals("alto")) {
                             // Convert ALTO to PageXML 2019
-                            System.out.println("Converting ALTO to PageXML 2019: " + file.getAbsolutePath());
+                            LOG.info("Converting ALTO to PageXML 2019: {}", file.getAbsolutePath());
                             String altoXml = StringTools.readFile(file.getAbsolutePath());
                             AltoDocument altoDocument = AltoUtils.readAltoDocumentFromString(altoXml);
                             if (altoDocument == null) {
-                                System.err.println("Failed to parse ALTO document: " + file.getAbsolutePath());
+                                LOG.error("Failed to parse ALTO document: {}", file.getAbsolutePath());
                                 continue;
                             }
                             DocumentPage documentPage = DocumentTypeConverter.altoDocumentToDocumentPage(altoDocument);
                             PcGts page = DocumentTypeConverter.documentPageToPage(documentPage);
-                            XmlMapper mapper = new XmlMapper();
-                            String pageXml2019 = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(page);
+                            String pageXml2019 = XML_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(page);
                             String outputFile = outputPath + "/" + file.getName();
                             Path path = Paths.get(outputPath);
                             if (!Files.exists(path)) {
@@ -326,7 +327,7 @@ public class MinionConvertOCRResult extends BaseMinion {
                             }
                             StringTools.writeFile(outputFile, pageXml2019);
                         } else {
-                            System.err.println("Unsupported source format: " + sourceFormat);
+                            LOG.error("Unsupported source format: {}", sourceFormat);
                         }
                     }
                 }
@@ -341,23 +342,22 @@ public class MinionConvertOCRResult extends BaseMinion {
                 inputDir = new File(inputPath);
                 files = inputDir.listFiles();
                 if (files == null) {
-                    System.err.println("Input path does not exist or is not a directory: " + inputPath);
+                    LOG.error("Input path does not exist or is not a directory: {}", inputPath);
                     return;
                 }
                 for (File file : files) {
                     if (file.isFile()) {
                         String sourceFormat = detectFileFormat(file.getAbsolutePath());
                         if (sourceFormat == null) {
-                            System.err.println("Skipping file with unknown format: " + file.getAbsolutePath());
+                            LOG.warn("Skipping file with unknown format: {}", file.getAbsolutePath());
                         } else if (sourceFormat.equals("pagexml2013")) {
                             String pageXml = StringTools.readFile(file.getAbsolutePath());
                             PcGts page = PageUtils.readPageFromString(pageXml);
                             DocumentPage documentPage = DocumentTypeConverter.pageToDocumentPage(page);
                             AltoDocument altoDocument = DocumentTypeConverter.documentPageToAlto(documentPage);
 
-                            XmlMapper mapper = new XmlMapper();
 //                            Write as altoXML
-                            String altoXml = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(altoDocument);
+                            String altoXml = XML_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(altoDocument);
                             if (validateAltoXML(altoXml)) {
                                 String outputFile = outputPath + "/" + file.getName();
                                 Path path = Paths.get(outputPath);
@@ -368,7 +368,7 @@ public class MinionConvertOCRResult extends BaseMinion {
                             }
 
                         } else {
-                            System.err.println("Unsupported source format: " + sourceFormat);
+                            LOG.error("Unsupported source format: {}", sourceFormat);
                         }
                     }
                 }
@@ -376,7 +376,7 @@ public class MinionConvertOCRResult extends BaseMinion {
 //                StringTools.writeFile(outputFileAlto, altoXmlB);
                 break;
             default:
-                System.err.println("Unknown format: " + targetFormat);
+                LOG.error("Unknown format: {}", targetFormat);
                 break;
         }
     }

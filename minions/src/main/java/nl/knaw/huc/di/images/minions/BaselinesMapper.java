@@ -6,17 +6,12 @@ import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.LayoutProc;
 import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.OpenCVWrapper;
 import nl.knaw.huc.di.images.layoutds.models.Page.Baseline;
 import nl.knaw.huc.di.images.layoutds.models.Page.Coords;
-import nl.knaw.huc.di.images.layoutds.models.Page.PcGts;
 import nl.knaw.huc.di.images.layoutds.models.Page.TextLine;
-import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import org.opencv.core.*;
-import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -142,7 +137,9 @@ public class BaselinesMapper {
         List<TextLine> textLines = new ArrayList<>();
         for (int i = 1; i < numLabels; i++) {
             Rect rect = LayoutProc.getRectFromStats(stats, i);
-            Mat submat = labeled.submat(rect).clone();
+            Mat roi = labeled.submat(rect);
+            Mat submat = roi.clone();
+            roi = OpenCVWrapper.release(roi);
             List<Point> baselinePoints = extractBaseline(submat, i, new Point(rect.x, rect.y), minimumHeight, identifier);
             submat = OpenCVWrapper.release(submat);
             if (baselinePoints.size() < 2) {
@@ -206,7 +203,7 @@ public class BaselinesMapper {
             baseline.add(point);
         }
         if (mergedLineDetected) {
-            System.out.println("lines detected for: " + imageFile);
+            LOG.info("lines detected for: {}", imageFile);
         }
         return baseline;
     }

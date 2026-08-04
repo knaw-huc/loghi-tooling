@@ -15,16 +15,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.xml.transform.TransformerException;
-import java.io.*;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.file.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.CodeSource;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
@@ -160,9 +164,8 @@ public class MinionDetectLanguageOfPageXml implements Runnable {
         }
 
         executor.shutdown();
-        while (!executor.isTerminated()) {
-        }
-        System.out.println("Finished all threads");
+
+        LOG.info("Finished all threads");
     }
 
     public static void printHelp(Options options, String callName) {
@@ -246,11 +249,10 @@ public class MinionDetectLanguageOfPageXml implements Runnable {
             } catch (XmlPullParserException e) {
                 throw new RuntimeException(e);
             }
-            System.out.println(mavenModel.getId());
-            System.out.println(mavenModel.getGroupId());
-            System.out.println(mavenModel.getArtifactId());
-            System.out.println(mavenModel.getVersion());
-
+            LOG.info("{}", mavenModel.getId());
+            LOG.info("{}", mavenModel.getGroupId());
+            LOG.info("{}", mavenModel.getArtifactId());
+            LOG.info("{}", mavenModel.getVersion());
             Label label = new Label();
             label.setType("version");
             label.setValue(mavenModel.getVersion());

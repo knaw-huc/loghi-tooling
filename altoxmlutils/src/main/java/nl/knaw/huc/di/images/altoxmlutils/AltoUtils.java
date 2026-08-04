@@ -1,7 +1,8 @@
 package nl.knaw.huc.di.images.altoxmlutils;
 
 import nl.knaw.huc.di.images.layoutds.models.Alto.*;
-import org.joda.time.DateTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
@@ -11,6 +12,8 @@ import java.util.ArrayList;
 import static nl.knaw.huc.di.images.stringtools.StringTools.convertStringToXMLDocument;
 
 public class AltoUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AltoUtils.class);
 
     public static AltoDocument readAltoDocumentFromString(String pageXmlString) {
         Document document = convertStringToXMLDocument(pageXmlString);
@@ -37,7 +40,7 @@ public class AltoUtils {
                     altoDocument.setLayout(getLayout(node));
                     break;
                 default:
-                    System.out.println(documentElement.getNodeName() + " - " + node.getNodeName());
+                    LOG.warn("Unexpected node {} - {}", documentElement.getNodeName(), node.getNodeName());
                     break;
             }
         }
@@ -58,7 +61,7 @@ public class AltoUtils {
 //                case "sourceImageInformation":
 //                    description.setSourceImageInformation(getSourceImageInformation(node));
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -66,7 +69,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -99,7 +102,7 @@ public class AltoUtils {
 //                case "sourceImageInformation":
 //                    description.setSourceImageInformation(getSourceImageInformation(node));
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -149,7 +152,7 @@ public class AltoUtils {
                     page.setPageConfidence(Float.parseFloat(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -173,7 +176,7 @@ public class AltoUtils {
             case "As in original":
                 return QualityType.AsInOriginal;
             default:
-                System.out.println("unknown PositionType: " + textContent);
+                LOG.warn("unknown PositionType: {}", textContent);
                 return null;
         }
     }
@@ -191,7 +194,7 @@ public class AltoUtils {
             case "Cover":
                 return PositionType.Cover;
             default:
-                System.out.println("unknown PositionType: " + textContent);
+                LOG.warn("unknown PositionType: {}", textContent);
                 return null;
         }
     }
@@ -224,7 +227,7 @@ public class AltoUtils {
                     margin.setHeight(Integer.parseInt(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -247,7 +250,7 @@ public class AltoUtils {
                     printSpace.getPrintSpaceBlocks().add(getComposedBlock(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -270,7 +273,7 @@ public class AltoUtils {
                     printSpace.setHeight(Integer.parseInt(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -307,7 +310,7 @@ public class AltoUtils {
                     block.setShape(getShape(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -336,7 +339,7 @@ public class AltoUtils {
                     block.setType(attribute.getTextContent());
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -357,7 +360,7 @@ public class AltoUtils {
                 case "type":
                     block.setType(node.getTextContent());
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -383,7 +386,7 @@ public class AltoUtils {
                     block.setRotation(Float.parseFloat(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -410,7 +413,7 @@ public class AltoUtils {
                 case "type":
                     block.setType(node.getTextContent());
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -451,7 +454,7 @@ public class AltoUtils {
                     block.setCS(Boolean.parseBoolean(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -470,7 +473,7 @@ public class AltoUtils {
                     shape.setPolygon(getPolygon(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -478,7 +481,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -495,7 +498,7 @@ public class AltoUtils {
             }
             switch (node.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -506,7 +509,7 @@ public class AltoUtils {
                     polygon.setPoints(attribute.getTextContent());
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -531,7 +534,7 @@ public class AltoUtils {
                     textLine.getTextLineElements().add(getHYP(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -557,7 +560,7 @@ public class AltoUtils {
                     textLine.setCS(Boolean.parseBoolean(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -574,7 +577,7 @@ public class AltoUtils {
             }
             switch (node.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -597,7 +600,7 @@ public class AltoUtils {
                     sp.setHeight(Integer.parseInt(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -618,7 +621,7 @@ public class AltoUtils {
 //                case "SP":
 //                    textLine.getContents().add(getSP(node));
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -644,7 +647,7 @@ public class AltoUtils {
                     hypenation.setContent(attribute.getTextContent());
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -661,7 +664,7 @@ public class AltoUtils {
             }
             switch (node.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -705,7 +708,7 @@ public class AltoUtils {
                     altoString.setStyle(getFontStylesType(attribute.getTextContent()));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -729,7 +732,7 @@ public class AltoUtils {
             case "underline":
                 return FontStylesType.underline;
             default:
-                System.out.println("unknown SubsType: " + textContent);
+                LOG.warn("unknown SubsType: {}", textContent);
                 return null;
         }
     }
@@ -743,7 +746,7 @@ public class AltoUtils {
             case "Abbreviation":
                 return SubsType.Abbreviation;
             default:
-                System.out.println("unknown SubsType: " + textContent);
+                LOG.warn("unknown SubsType: {}", textContent);
                 return null;
         }
     }
@@ -763,7 +766,7 @@ public class AltoUtils {
 //                    styles.add(getTextStyle(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -771,7 +774,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -800,7 +803,7 @@ public class AltoUtils {
                     description.setOcrProcessing(getOCRProcessing(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -808,7 +811,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -834,7 +837,7 @@ public class AltoUtils {
                     ocrProcessing.getPostProcessingStep().add(getProcessingStep(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -846,7 +849,7 @@ public class AltoUtils {
                     break;
 
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -866,8 +869,12 @@ public class AltoUtils {
                     break;
                 case "processingDateTime":
 //                    DateFormat dateFormat = new SimpleDateFormat("[-]CCYY-MM-DDThh:mm:ss[Z|(+|-)hh:mm]");
-                    DateTime dateTime = new DateTime(DatatypeConverter.parseDateTime(node.getTextContent()));
-                    processingStep.setProcessingDate(dateTime.toString());
+                    // OPT-04: java.time replaces joda-time
+                    java.time.ZonedDateTime processingDateTime = DatatypeConverter
+                            .parseDateTime(node.getTextContent())
+                            .toInstant()
+                            .atZone(java.time.ZoneId.systemDefault());
+                    processingStep.setProcessingDate(processingDateTime.toString());
                     break;
                 case "processingAgency":
                     processingStep.setProcessingAgency(node.getTextContent());
@@ -882,7 +889,7 @@ public class AltoUtils {
                     processingStep.setProcessingSoftware(getProcessingSoftware(node));
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -890,7 +897,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -918,7 +925,7 @@ public class AltoUtils {
                     ocrProcessingSoftware.setApplicationDescription(node.getTextContent());
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -926,7 +933,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -942,7 +949,7 @@ public class AltoUtils {
             }
             switch (node.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -950,7 +957,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -969,7 +976,7 @@ public class AltoUtils {
                     sourceImageInformation.setFileName(node.getTextContent());
                     break;
                 default:
-                    System.out.println(parent.getNodeName() + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                    LOG.warn("Unexpected child node {} - {} - {}", parent.getNodeName(), node.getNodeName(), node.getNodeValue());
                     break;
             }
         }
@@ -977,7 +984,7 @@ public class AltoUtils {
             Node attribute = parent.getAttributes().item(j);
             switch (attribute.getNodeName()) {
                 default:
-                    System.out.println(parent.getNodeName() + " - " + attribute.getNodeName() + " - " + attribute.getNodeValue());
+                    LOG.warn("Unexpected attribute {} - {} - {}", parent.getNodeName(), attribute.getNodeName(), attribute.getNodeValue());
                     break;
             }
         }
@@ -993,7 +1000,7 @@ public class AltoUtils {
             case "inch":
                 return MeasurementUnit.inch;
             default:
-                System.out.println("MeasurementUnit" + " - " + node.getNodeName() + " - " + node.getNodeValue());
+                LOG.warn("Unexpected MeasurementUnit {} - {}", node.getNodeName(), node.getNodeValue());
                 return MeasurementUnit.pixel;
         }
 

@@ -66,8 +66,8 @@ class BaselinesMapperTest {
     @Test
     public void returnsMappingWithoutNewLinesThatMatchMultipleOldLines() {
         final List<TextLine> newLines = new ArrayList<>();
-        newLines.add(createTextLineWithIdAndBaselineCoords("newId", "0,20, 400,20"));
-        final List<TextLine> oldLines = List.of(createTextLineWithIdAndBaselineCoords("oldId1", "0,20, 200,20"), createTextLineWithIdAndBaselineCoords("oldId2", "200,20, 400,20"));
+        newLines.add(createTextLineWithIdAndBaselineCoords("newId", "0,20 400,20"));
+        final List<TextLine> oldLines = List.of(createTextLineWithIdAndBaselineCoords("oldId1", "0,20 200,20"), createTextLineWithIdAndBaselineCoords("oldId2", "200,20 400,20"));
 
         final Map<String, String> newLinesToOldLinesMap = BaselinesMapper.mapNewLinesToOldLines(newLines, oldLines, new Size(500, 500));
 
@@ -76,8 +76,8 @@ class BaselinesMapperTest {
 
     @Test
     public void returnsMappingWithoutNewLinesThatMatchTheSameOldLine() {
-        final List<TextLine> newLines = List.of(createTextLineWithIdAndBaselineCoords("newId1", "0,20, 200,20"), createTextLineWithIdAndBaselineCoords("newId2", "200,20, 400,20"));
-        final List<TextLine> oldLines = List.of(createTextLineWithIdAndBaselineCoords("oldId", "0,20, 400,20"));
+        final List<TextLine> newLines = List.of(createTextLineWithIdAndBaselineCoords("newId1", "0,20 200,20"), createTextLineWithIdAndBaselineCoords("newId2", "200,20 400,20"));
+        final List<TextLine> oldLines = List.of(createTextLineWithIdAndBaselineCoords("oldId", "0,20 400,20"));
 
         final Map<String, String> newLinesToOldLinesMap = BaselinesMapper.mapNewLinesToOldLines(newLines, oldLines, new Size(500, 500));
 

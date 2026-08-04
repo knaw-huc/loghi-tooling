@@ -1,5 +1,6 @@
 package nl.knaw.huc.di.images.imageanalysiscommon;
 
+
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -9,6 +10,8 @@ import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -20,6 +23,7 @@ import java.nio.file.Paths;
 import java.util.*;
 
 public class LocalBinaryPattern {
+    private static final Logger LOG = LoggerFactory.getLogger(LocalBinaryPattern.class);
     static {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
     }
@@ -84,9 +88,12 @@ public class LocalBinaryPattern {
         for (int i = 1; i < image.height() - 2; i++) {
 //            System.out.println(i);
             for (int j = 1; j < image.width() - 2; j++) {
-
                 Mat submat = image.submat(i, i + 3, j, j + 3);
-                doPattern(submat, pattern);
+                try {
+                    doPattern(submat, pattern);
+                } finally {
+                    submat.release();
+                }
             }
 
         }
@@ -134,16 +141,16 @@ public class LocalBinaryPattern {
                 int[] pattern1 = getHisto(resizedImage);
 
                 out.print(file.toAbsolutePath().toString() + "\t");
-                System.out.print(file.toAbsolutePath().toString() + "\t");
+                LOG.info(file.toAbsolutePath().toString() + "\t");
                 String patternString = "";
                 for (int i = 0; i < 256; i++) {
                     patternString += pattern1[i] + "\t";
-                    System.out.print(patternString);
+                    LOG.info(patternString);
                 }
 
                 out.print(patternString);
                 out.println();
-                System.out.println();
+                LOG.info("");
                 out.flush();
 
                 resizedImage.release();
@@ -178,8 +185,14 @@ public class LocalBinaryPattern {
 
     public static List<String> findFamiliar(Mat input) throws IOException {
         Mat resizedImage = resize(input);
-
-        int[] patternToMatch = getHisto(resizedImage.submat((int) (resizedImage.height() * 0.25), (int) (resizedImage.height() * 0.75), (int) (resizedImage.width() * 0.25), (int) (resizedImage.width() * 0.75)));
+        Mat centerSubmat = resizedImage.submat((int) (resizedImage.height() * 0.25), (int) (resizedImage.height() * 0.75), (int) (resizedImage.width() * 0.25), (int) (resizedImage.width() * 0.75));
+        int[] patternToMatch;
+        try {
+            patternToMatch = getHisto(centerSubmat);
+        } finally {
+            centerSubmat.release();
+            resizedImage.release();
+        }
 //        int[] patternToMatch = getHisto(input.submat((int) (input.height() * 0), (int) (input.height() ), (int) (input.width() ), (int) (input.width() )));
 
         HashMap<String, int[]> testData = readCsv();
@@ -200,8 +213,7 @@ public class LocalBinaryPattern {
         List<String> results = new ArrayList<>();
         for (Object e : a) {
             results.add(((Map.Entry<String, Integer>) e).getKey());
-            System.out.println(((Map.Entry<String, Integer>) e).getKey() + " : "
-                    + ((Map.Entry<String, Integer>) e).getValue());
+            LOG.info("{} : {}", ((Map.Entry<String, Integer>) e).getKey(), ((Map.Entry<String, Integer>) e).getValue());
         }
 
         return results;

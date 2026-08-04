@@ -30,6 +30,10 @@ public class OpenCVWrapper {
         Mat newMat = new Mat(size, cvType, scalar);
         return newMat;
     }
+    public static synchronized Mat newMat(int rows, int cols, int cvType) {
+        Mat newMat = new Mat(rows, cols, cvType);
+        return newMat;
+    }
 
     public static synchronized Mat zeros(Size size, int cvType) {
         Mat newMat = Mat.zeros(size, cvType);
@@ -349,6 +353,30 @@ public class OpenCVWrapper {
         return destination;
     }
 
+    /**
+     * Synchronised, leak-tracked equivalent of {@link Imgcodecs#imread(String)}.
+     * <p>
+     * Always pre-allocates the destination {@link Mat} through {@link #newMat()},
+     * so the returned object is always non-null and goes through the same
+     * synchronisation lock as other allocations. Ownership of the returned
+     * {@code Mat} is transferred to the caller — the caller must release it via
+     * {@link #release(Mat)} (or in a {@code finally} block / try-with-resources
+     * wrapper such as {@link MatScope}).
+     *
+     * @param filePath file system path to the image file
+     * @return a {@link Mat} that may be {@code empty()} if OpenCV could not
+     * decode the file (callers should check this before use)
+     */
+    public static Mat imread(String filePath) {
+        if (filePath == null || filePath.isEmpty()) {
+            LOG.error("File path is null or empty. Cannot read image.");
+            throw new IllegalArgumentException("File path is null or empty. Cannot read image.");
+        }
+        Mat destination = newMat();
+        Imgcodecs.imread(filePath, destination);
+        return destination;
+    }
+
     public static void resize(Mat input, Mat destination, Size newSize) {
         if (input == null) {
             LOG.error("Input is null. Cannot resize image.");
@@ -416,5 +444,17 @@ public class OpenCVWrapper {
             throw new IllegalArgumentException("Labels Mat size does not match input size. Cannot perform connected components analysis.");
         }
         return Imgproc.connectedComponentsWithStats(input, labeled, stats, centroids, connectivity, type);
+    }
+
+    public static synchronized MatOfPoint2f newMatOfPoint2f() {
+        return new MatOfPoint2f();
+    }
+
+    public static synchronized MatOfPoint newMatOfPoint() {
+        return new MatOfPoint();
+    }
+
+    public static synchronized Mat newMatCV_64F(Size size, Scalar mean) {
+        return new Mat(size, CV_64F, mean);
     }
 }

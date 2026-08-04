@@ -105,8 +105,15 @@ public class AclServiceTest {
         final PimGroup otherGroup = new PimGroup();
         pimGroupDAO.save(otherGroup);
         PimUser pimUser = userWithMembershipAndPrimaryGroup(primaryGroup, Role.PI);
-        pimUser.addMembership(otherGroup, Role.PI);
         pimUserDao.save(pimUser);
+        // Add membership and save within the same transaction
+        try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
+            Transaction transaction = session.beginTransaction();
+            pimUser = pimUserDao.getByUUID(session, pimUser.getUuid());
+            pimUser.addMembership(otherGroup, Role.PI);
+            pimUserDao.save(session, pimUser);
+            transaction.commit();
+        }
         final UUID subjectUuid = UUID.randomUUID();
         final Acl acl = Acl.readPermission(subjectUuid, primaryGroup, Role.ASSISTANT);
         aclDao.save(acl);
@@ -114,7 +121,15 @@ public class AclServiceTest {
         aclDao.save(otherAcl);
 
         try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
+            Transaction transaction = session.beginTransaction();
             pimUser = pimUserDao.getByUUID(session, pimUser.getUuid());
+            // Force initialization of memberships and primaryGroup's supergroups
+            pimUser.getMemberships().size();
+            pimUser.getPrimaryGroup().getSupergroups().size();
+            transaction.commit();
+        }
+
+        try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
             final Set<Acl> aclsOfEnitity = aclService.getAclsOfEnitity(session, subjectUuid, pimUser);
 
             // Only contains
@@ -140,7 +155,17 @@ public class AclServiceTest {
         aclDao.save(otherAcl);
 
         try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
+            Transaction transaction = session.beginTransaction();
             pimUser = pimUserDao.getByUUID(session, pimUser.getUuid());
+            // Force initialization of memberships
+            pimUser.getMemberships().size();
+            transaction.commit();
+        }
+
+        try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
+            pimUser = pimUserDao.getByUUID(session, pimUser.getUuid());
+            // Force initialization of primaryGroup's supergroups in the SAME session where we call getAclsOfEnitity
+            pimUser.getPrimaryGroup().getSupergroups().size();
             final Set<Acl> aclsOfEnitity = aclService.getAclsOfEnitity(session, subjectUuid, pimUser);
 
             // Only contains

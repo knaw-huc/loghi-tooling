@@ -43,6 +43,22 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
 
     private final List<String> readingOrderList;
 
+    private static final class TextLineGeometry {
+        private final List<Point> baselinePoints;
+        private final Point start;
+        private final Point end;
+        private final Rect baselineRect;
+        private final Rect coordsRect;
+
+        private TextLineGeometry(TextLine textLine) {
+            this.baselinePoints = StringConverter.stringToPoint(textLine.getBaseline().getPoints());
+            this.start = baselinePoints.get(0);
+            this.end = baselinePoints.get(baselinePoints.size() - 1);
+            this.baselineRect = LayoutProc.getBoundingBox(baselinePoints);
+            this.coordsRect = LayoutProc.getBoundingBox(StringConverter.stringToPoint(textLine.getCoords().getPoints()));
+        }
+    }
+
     public MinionRecalculateReadingOrderNew(String identifier, PcGts page, Consumer<PcGts> pageSaver,
                                             boolean cleanBorders, int borderMargin, boolean asSingleRegion,
                                             double interlineClusteringMultiplier, double dubiousSizeWidthMultiplier,
@@ -185,9 +201,15 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
             }
         }
         executor.shutdown();
-        while (!executor.isTerminated()) {
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.DAYS)) {
+                LOG.warn("Timed out waiting for reading-order workers to finish");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for reading-order workers", e);
         }
-        System.out.println("Finished all threads");
+        LOG.info("Finished all threads");
     }
 
     @Override
@@ -207,38 +229,51 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
             return getPcGtsWithSingleRegion(page, allLines);
         }
 
-        double interlinemedian = LayoutProc.interlineMedian(allLines, 10);
+        List<TextLineGeometry> allLineGeometries = new ArrayList<>(allLines.size());
+        Map<TextLine, TextLineGeometry> geometryByTextLine = new IdentityHashMap<>();
+        for (TextLine textLine : allLines) {
+            TextLineGeometry textLineGeometry = new TextLineGeometry(textLine);
+            allLineGeometries.add(textLineGeometry);
+            geometryByTextLine.put(textLine, textLineGeometry);
+        }
+
+        double interlinemedian = interlineMedian(allLineGeometries, 10);
         LOG.info(id + " interlinemedian: " + interlinemedian);
 
         List<TextLine> linesToRemove = new ArrayList<>();
         page.getPage().getTextRegions().clear();
         if (cleanBorders) {
-            cleanBorders(page, borderMargin, allLines, dubiousSizeWidth, linesToRemove);
+            cleanBorders(page, borderMargin, allLines, dubiousSizeWidth, linesToRemove, geometryByTextLine);
         }
 
-        List<TextLine> removedLines = new ArrayList<>();
+        Set<TextLine> removedLines = Collections.newSetFromMap(new IdentityHashMap<>());
         for (TextLine textLine : allLines) {
             if (removedLines.contains(textLine)) {
                 continue;
             }
+            TextLineGeometry textLineGeometry = geometryByTextLine.get(textLine);
             List<TextLine> cluster = new ArrayList<>();
             cluster.add(textLine);
-            Rect regionPoints = LayoutProc.getBoundingBoxTextLines(cluster);
+            Rect regionPoints = textLineGeometry.coordsRect;
             removedLines.add(textLine);
-            List<TextLine> checkedTextLines = new ArrayList<>();
+            Set<TextLine> checkedTextLines = Collections.newSetFromMap(new IdentityHashMap<>());
 
             boolean newLinesAdded = true;
             while (newLinesAdded) {
                 newLinesAdded = false;
-                ArrayList<TextLine> toCheck = new ArrayList<>(cluster);
-                toCheck.removeAll(checkedTextLines);
+                ArrayList<TextLine> toCheck = new ArrayList<>(cluster.size());
+                for (TextLine clusteredTextLine : cluster) {
+                    if (!checkedTextLines.contains(clusteredTextLine)) {
+                        toCheck.add(clusteredTextLine);
+                    }
+                }
                 for (TextLine mainTextLine : toCheck) {
                     checkedTextLines.add(mainTextLine);
 //                    System.out.println("new mainTextLine: " + stopwatch.elapsed(TimeUnit.MILLISECONDS));
-                    List<Point> mainPoints = StringConverter.stringToPoint(mainTextLine.getBaseline().getPoints());
+                    TextLineGeometry mainTextLineGeometry = geometryByTextLine.get(mainTextLine);
 //                    double mainTextLineOrientation = LayoutProc.getMainAngle(mainPoints);
-                    Point mainTextLineStart = mainPoints.get(0);
-                    Point mainTextLineEnd = mainPoints.get(mainPoints.size() - 1);
+                    Point mainTextLineStart = mainTextLineGeometry.start;
+                    Point mainTextLineEnd = mainTextLineGeometry.end;
 
                     for (TextLine subTextLine : allLines) {
                         if (removedLines.contains(subTextLine)) {
@@ -249,17 +284,17 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
 //                if (LayoutProc.distance())
 //                && closeby
 //                        System.out.println("new subtextline: " + stopwatch.elapsed(TimeUnit.MILLISECONDS));
-                        List<Point> subPoints = StringConverter.stringToPoint(subTextLine.getBaseline().getPoints());
-                        Point subTextLineStart = subPoints.get(0);
-                        Point subTextLineEnd = subPoints.get(subPoints.size() - 1);
-                        Rect textLineRect = LayoutProc.getBoundingBox(subPoints);
+                        TextLineGeometry subTextLineGeometry = geometryByTextLine.get(subTextLine);
+                        Point subTextLineStart = subTextLineGeometry.start;
+                        Point subTextLineEnd = subTextLineGeometry.end;
+                        Rect textLineRect = subTextLineGeometry.baselineRect;
                         // if textline inside region already
                         if (regionPoints.x< textLineRect.x &&
                                 regionPoints.x + regionPoints.width > textLineRect.x + textLineRect.width &&
                                 regionPoints.y< textLineRect.y &&
                                 regionPoints.y + regionPoints.height > textLineRect.y + textLineRect.height){
                             cluster.add(subTextLine);
-                            regionPoints = LayoutProc.growCluster(regionPoints, subTextLine);
+                            regionPoints = growCluster(regionPoints, subTextLineGeometry.coordsRect);
 
                             removedLines.add(subTextLine);
                             newLinesAdded = true;
@@ -269,7 +304,7 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
                         double maxDistance = interlinemedian * interlineClusteringMultiplier;
                         if (StringConverter.distance(mainTextLineStart, subTextLineStart) < maxDistance) {
                             cluster.add(subTextLine);
-                            regionPoints = LayoutProc.growCluster(regionPoints, subTextLine);
+                            regionPoints = growCluster(regionPoints, subTextLineGeometry.coordsRect);
                             removedLines.add(subTextLine);
                             newLinesAdded = true;
                         } else {
@@ -281,7 +316,7 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
                                 // and y-distance is less than interlineClusteringMultiplier * interline
                                 if (Math.abs(averageSubPointY - mainTextLineY) < maxDistance) {
                                     cluster.add(subTextLine);
-                                    regionPoints = LayoutProc.growCluster(regionPoints, subTextLine);
+                                    regionPoints = growCluster(regionPoints, subTextLineGeometry.coordsRect);
                                     removedLines.add(subTextLine);
                                     newLinesAdded = true;
                                 }
@@ -303,9 +338,7 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
 
             Rect finalRegionPoints = regionPoints;
             cluster.sort(Comparator.comparing(textLine1 ->
-                    StringConverter.distance(new Point(finalRegionPoints.x, finalRegionPoints.y),
-                            new Point(finalRegionPoints.x + (StringConverter.stringToPoint(textLine1.getBaseline().getPoints()).get(0).x - finalRegionPoints.x) / 10,
-                                    StringConverter.stringToPoint(textLine1.getBaseline().getPoints()).get(0).y))));
+                    distanceFromRegionStart(finalRegionPoints, geometryByTextLine.get(textLine1))));
             int counter = 0;
             for (TextLine textLine1 : cluster) {
 //                TODO: maybe use TextLineCustom here instead.
@@ -338,23 +371,30 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
         return page;
     }
 
+    private static double distanceFromRegionStart(Rect regionPoints, TextLineGeometry textLineGeometry) {
+        Point baselineStart = textLineGeometry.start;
+        return StringConverter.distance(new Point(regionPoints.x, regionPoints.y),
+                new Point(regionPoints.x + (baselineStart.x - regionPoints.x) / 10, baselineStart.y));
+    }
+
     private static String getOldCustom(TextLine textLine1) {
         String oldCustom = textLine1.getCustom();
         if (!Strings.isNullOrEmpty(oldCustom) && oldCustom.contains("readingOrder {index:")){
             // remove old reading order
             String prefix = oldCustom.substring(0, oldCustom.indexOf("readingOrder {index:"));
-            String suffix = oldCustom.split("readingOrder")[1];
-            suffix = suffix.substring(suffix.indexOf("}")+1);
+            String suffix = oldCustom.substring(oldCustom.indexOf("readingOrder"));
+            suffix = suffix.substring(suffix.indexOf("}") + 1);
             oldCustom = prefix + suffix;
         }
         return oldCustom;
     }
 
-    private static void cleanBorders(PcGts page, int borderMargin, List<TextLine> allLines, double dubiousSizeWidth, List<TextLine> linesToRemove) {
+    private static void cleanBorders(PcGts page, int borderMargin, List<TextLine> allLines, double dubiousSizeWidth,
+                                     List<TextLine> linesToRemove, Map<TextLine, TextLineGeometry> geometryByTextLine) {
         for (TextLine textLine : allLines) {
-            List<Point> points = StringConverter.stringToPoint(textLine.getBaseline().getPoints());
-            Point textLineStart = points.get(0);
-            Point textLineEnd = points.get(points.size() - 1);
+            TextLineGeometry textLineGeometry = geometryByTextLine.get(textLine);
+            Point textLineStart = textLineGeometry.start;
+            Point textLineEnd = textLineGeometry.end;
             if (Math.abs(textLineEnd.x - page.getPage().getImageWidth()) < borderMargin) {
                 if (StringConverter.distance(textLineStart, textLineEnd) < dubiousSizeWidth) {
                     linesToRemove.add(textLine);
@@ -368,6 +408,51 @@ public class MinionRecalculateReadingOrderNew implements Runnable, AutoCloseable
 
         }
         allLines.removeAll(linesToRemove);
+    }
+
+    private static double interlineMedian(List<TextLineGeometry> textLineGeometries, double minValue) {
+        double interlineDistance = interlineMedian(textLineGeometries);
+        return Math.max(interlineDistance, minValue);
+    }
+
+    private static double interlineMedian(List<TextLineGeometry> textLineGeometries) {
+        if (textLineGeometries.isEmpty()) {
+            return 0;
+        }
+
+        List<Point> allPoints = new ArrayList<>();
+        for (TextLineGeometry textLineGeometry : textLineGeometries) {
+            allPoints.addAll(textLineGeometry.baselinePoints);
+        }
+
+        ArrayList<Double> distances = new ArrayList<>(textLineGeometries.size());
+        for (TextLineGeometry textLineGeometry : textLineGeometries) {
+            ArrayList<Point> otherPoints = new ArrayList<>(allPoints);
+            otherPoints.removeAll(textLineGeometry.baselinePoints);
+            double distance = LayoutProc.findClosestDistance(otherPoints, textLineGeometry.baselinePoints);
+            distances.add(distance);
+        }
+        return median(distances);
+    }
+
+    private static double median(List<Double> values) {
+        if (values.isEmpty()) {
+            return 0;
+        }
+        values.sort(Double::compareTo);
+        int size = values.size();
+        if (size % 2 == 0) {
+            return (values.get((size / 2) - 1) + values.get(size / 2)) / 2.0;
+        }
+        return values.get(size / 2);
+    }
+
+    private static Rect growCluster(Rect region, Rect textLineBoundingBox) {
+        int xStart = Math.min(region.x, textLineBoundingBox.x);
+        int yStart = Math.min(region.y, textLineBoundingBox.y);
+        int xStop = Math.max(region.x + region.width, textLineBoundingBox.x + textLineBoundingBox.width);
+        int yStop = Math.max(region.y + region.height, textLineBoundingBox.y + textLineBoundingBox.height);
+        return new Rect(xStart, yStart, xStop - xStart, yStop - yStart);
     }
 
     private static PcGts getPcGtsWithSingleRegion(PcGts page, List<TextLine> allLines) {

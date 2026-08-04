@@ -43,8 +43,11 @@ public class LayoutConfiguration {
 
     public static LayoutConfiguration getGlobal() {
         if (global == null) {
-            System.err.println("global config not set yet");
-            System.exit(1);
+            // Previously this called System.exit(1), which crashes the JVM
+            // (a JUnit forked VM in particular). Throwing an IllegalStateException
+            // is far more debuggable and lets callers handle the missing config.
+            throw new IllegalStateException("LayoutConfiguration global instance has not been initialised. " +
+                    "Call LayoutConfiguration.setGlobal(...) before using LayoutProc / DocumentPage helpers that rely on it.");
         }
         return global;
     }

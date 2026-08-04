@@ -38,7 +38,13 @@ public class Pooler {
 
         for (int i =0; i< returnImage.height();i++){
             for (int j =0; j< returnImage.width();j++){
-                int maxValue = getMin(image.submat(i*scaleFactor ,(i+1)*scaleFactor ,j*scaleFactor , (j+1)*scaleFactor ));
+                Mat window = image.submat(i*scaleFactor ,(i+1)*scaleFactor ,j*scaleFactor , (j+1)*scaleFactor );
+                int maxValue;
+                try {
+                    maxValue = getMax(window);
+                } finally {
+                    window.release();
+                }
                 returnImage.put(i,j, maxValue);
             }
         }
@@ -54,8 +60,14 @@ public class Pooler {
 
         for (int i =0; i< returnImage.height();i++){
             for (int j =0; j< returnImage.width();j++){
-                int maxValue = getMin(image.submat(i*scaleFactor,(i+1)*scaleFactor,j*scaleFactor, (j+1)*scaleFactor));
-                returnImage.put(i,j, maxValue);
+                Mat window = image.submat(i * scaleFactor, (i + 1) * scaleFactor, j * scaleFactor, (j + 1) * scaleFactor);
+                int minValue;
+                try {
+                    minValue = getMin(window);
+                } finally {
+                    window.release();
+                }
+                returnImage.put(i,j, minValue);
             }
         }
 

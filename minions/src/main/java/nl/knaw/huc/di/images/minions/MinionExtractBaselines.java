@@ -15,8 +15,8 @@ import org.apache.commons.cli.*;
 import org.apache.commons.io.FilenameUtils;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
-import org.opencv.core.Point;
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
@@ -286,7 +286,9 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
         List<TextLine> textLines = new ArrayList<>();
         for (int labelNumber = 1; labelNumber < numLabels; labelNumber++) {
             Rect rect = LayoutProc.getRectFromStats(stats, labelNumber);
-            Mat connectedBaseLineSubmat = labeled.submat(rect).clone();
+            Mat connectedBaseLineRoi = labeled.submat(rect);
+            Mat connectedBaseLineSubmat = connectedBaseLineRoi.clone();
+            connectedBaseLineRoi = OpenCVWrapper.release(connectedBaseLineRoi);
             Point offsetPointConnectedBaseLine = new Point(rect.x, rect.y);
             if (splitBaselines) {
                 extractSplittedBaselines(identifier, minimumHeight, textLines, labelNumber, connectedBaseLineSubmat,
@@ -548,7 +550,9 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
                     }
                     String finalImageFile = imageFile;
 
+                    // Ownership contract: caller must release Mats returned by these suppliers.
                     final Supplier<Mat> baselineImageSupplier = () -> OpenCVWrapper.imread(baselineImageFile, Imgcodecs.IMREAD_GRAYSCALE);
+                    // Ownership contract: caller must release Mats returned by these suppliers.
                     final Supplier<Mat> imageSupplier = () -> OpenCVWrapper.imread(finalImageFile, Imgcodecs.IMREAD_UNCHANGED);
                     final Runnable worker = new MinionExtractBaselines(baselineImageFile, pageSupplier, imageSupplier,
                             outputFile, asSingleRegion, p2PaLAConfigContents, laypaConfigContents,
@@ -561,7 +565,13 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
             }
         }
         executor.shutdown();
-        while (!executor.isTerminated()) {
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.DAYS)) {
+                LOG.warn("Timed out waiting for MinionExtractBaselines workers to finish");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for MinionExtractBaselines workers", e);
         }
 
 
@@ -633,7 +643,7 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
             LayoutProc.recalculateTextLineContoursFromBaselines(identifier, imageMat, page,
                     MinionCutFromImageBasedOnPageXMLNew.SHRINK_FACTOR,
                     MinionCutFromImageBasedOnPageXMLNew.DEFAULT_MINIMUM_INTERLINE_DISTANCE,
-                    thickness, minimumBaselineThickness, false);
+                    thickness, minimumBaselineThickness, true);
         }
         imageMat = OpenCVWrapper.release(imageMat);
 
@@ -712,7 +722,7 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
 
 
         for (Object key : yamlMap.keySet()) {
-            System.out.println(key);
+            LOG.info("{}", key);
             if (key.equals("MODEL")) {
                 laypaConfig.setModel(String.valueOf(yamlMap.get(key)));
             }
@@ -831,10 +841,10 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
                     thickness, this.triggerLineThicknessMultiplier, this.maxLineThicknessMultiplier, this.minimumBaselineThickness);
         } catch (IOException e) {
             errorFileWriter.ifPresent(errorWriter -> errorWriter.write(identifier, e, "Could not process page"));
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         } catch (TransformerException e) {
             errorFileWriter.ifPresent(errorWriter -> errorWriter.write(identifier, e, "Could not transform page"));
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         } catch (org.json.simple.parser.ParseException e) {
             errorFileWriter.ifPresent(errorWriter -> errorWriter.write(identifier, e, "Could not process config"));
             throw new RuntimeException(e);
@@ -842,7 +852,7 @@ public class MinionExtractBaselines implements Runnable, AutoCloseable {
             try {
                 this.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                LOG.error("Unexpected error", e);
             }
         }
     }

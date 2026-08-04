@@ -1,10 +1,11 @@
 package nl.knaw.huc.di.images.layoutds.DAO;
 
+
 import com.google.common.base.Stopwatch;
 import com.google.common.base.Strings;
 import nl.knaw.huc.di.images.layoutds.SessionFactorySingleton;
-import nl.knaw.huc.di.images.layoutds.models.Vector;
 import nl.knaw.huc.di.images.layoutds.models.*;
+import nl.knaw.huc.di.images.layoutds.models.Vector;
 import nl.knaw.huc.di.images.layoutds.models.pim.PimFieldSet;
 import nl.knaw.huc.di.images.layoutds.models.pim.PimUser;
 import nl.knaw.huc.di.images.layoutds.models.pim.Swipe;
@@ -13,6 +14,8 @@ import org.hibernate.Session;
 import org.hibernate.Transaction;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.query.Query;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.persistence.Tuple;
 import javax.persistence.TypedQuery;
@@ -23,6 +26,7 @@ import java.util.stream.Stream;
 
 public class DocumentImageDAO extends GenericDAO<DocumentImage> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DocumentImageDAO.class);
     public DocumentImageDAO() {
         super(DocumentImage.class);
     }
@@ -1816,12 +1820,12 @@ public class DocumentImageDAO extends GenericDAO<DocumentImage> {
         query.setMaxResults(maxResult);
 
         final List<UUID> resultList = query.getResultList();
-        System.out.println("getImageUuidsWithoutVectorOfModelWithPageXml took: " + started.stop());
+        LOG.info("getImageUuidsWithoutVectorOfModelWithPageXml took: {}", started.stop());
         return resultList;
     }
 
     public List<UUID> getImageIdsWithoutOcrResult(int maxResults, List<String> allowedSearchIndices) {
-        System.out.println("getImageIdsWithoutOcrResult");
+        LOG.info("getImageIdsWithoutOcrResult");
         try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
             final Query<String> query = session.createNativeQuery("select cast(documentimage.uuid as varchar) " +
                     "from documentimage  " +

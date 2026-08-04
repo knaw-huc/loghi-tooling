@@ -46,7 +46,7 @@ public class StyledString {
     }
 
     public static StyledString fromStringWithStyleCharacters(String stringWithStyles) {
-        final List<StyledChar> styledCharList = new ArrayList<>(); // TODO make sortedset
+        final List<StyledChar> styledCharList = new ArrayList<>(); // positional list; ordering is by character offset and must preserve duplicates
         List<String> styles = new ArrayList<>();
         for (char character : stringWithStyles.toCharArray()) {
             final String stringOfCharacter = String.valueOf(character);
@@ -261,19 +261,19 @@ public class StyledString {
         int styleOffset = 0;
         for (int i = 0; i < styledCharList.size(); i++) {
             final StyledChar styledChar = styledCharList.get(i);
-            final List<String> charStyle = styledChar.styles;
+            final java.util.LinkedHashSet<String> charStyle = styledChar.styles;
             if (currentStyle == null && !charStyle.isEmpty()) {
-                currentStyle = charStyle;
+                currentStyle = new ArrayList<>(charStyle);
                 styleOffset = i;
             }
 
             if (currentStyle != null) {
-                if (currentStyle.equals(charStyle)) {
+                if (currentStyle.equals(new ArrayList<>(charStyle))) {
                     styleLength++;
                 } else  {
                     final List<String> styleNames = currentStyle.stream().map(CHARACTER_STYLE_MAP::get).collect(Collectors.toList());
                     stringStyles.add(new StringStyle(styleOffset, styleLength, styleNames));
-                    currentStyle = charStyle;
+                    currentStyle = new ArrayList<>(charStyle);
                     styleLength = 1;
                     styleOffset = i;
                 }
@@ -311,19 +311,22 @@ public class StyledString {
 
     public static class StyledChar {
         private final char character;
-        private final List<String> styles; // TODO make sortedset
+        // OPT-05: LinkedHashSet de-duplicates style names but preserves insertion order
+        // so serialised output is stable for the same logical document. (TreeSet would
+        // sort alphabetically and break callers that depend on emit order.)
+        private final java.util.LinkedHashSet<String> styles;
 
         public StyledChar(char character) {
             this.character = character;
-            this.styles = new ArrayList<>();
+            this.styles = new java.util.LinkedHashSet<>();
         }
 
-        public StyledChar(char character, List<String> styles) {
+        public StyledChar(char character, java.util.Collection<String> styles) {
             this.character = character;
-            this.styles = styles;
+            this.styles = new java.util.LinkedHashSet<>(styles);
         }
 
-        public void applyStyles(List<String> styleCharacter) {
+        public void applyStyles(java.util.Collection<String> styleCharacter) {
             styles.addAll(styleCharacter);
         }
 

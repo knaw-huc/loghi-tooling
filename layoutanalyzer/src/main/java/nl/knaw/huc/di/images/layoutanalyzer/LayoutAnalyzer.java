@@ -1,29 +1,24 @@
 package nl.knaw.huc.di.images.layoutanalyzer;
 
-import com.google.common.base.Stopwatch;
 import nl.knaw.huc.di.images.imageanalysiscommon.Histogram;
 import nl.knaw.huc.di.images.imageanalysiscommon.connectedComponent.ConnectedComponentProc;
 import nl.knaw.huc.di.images.imageanalysiscommon.imageConversion.ImageConversionHelper;
-import nl.knaw.huc.di.images.imageanalysiscommon.model.ComposedBlock;
 import nl.knaw.huc.di.images.imageanalysiscommon.visualization.VisualizationHelper;
 import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.LayoutProc;
 import nl.knaw.huc.di.images.layoutanalyzer.layoutlib.OpenCVWrapper;
-import nl.knaw.huc.di.images.layoutds.models.DocumentTextBlock;
-import nl.knaw.huc.di.images.layoutds.models.DocumentTextLine;
 import nl.knaw.huc.di.images.layoutds.models.connectedComponent.ConnectedComponent;
-import nl.knaw.huc.di.images.layoutds.models.connectedComponent.DicoveredLabel;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
-import org.opencv.core.Point;
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerException;
@@ -32,13 +27,16 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.io.*;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static nl.knaw.huc.di.images.imageanalysiscommon.visualization.VisualizationHelper.colorize;
 import static org.opencv.core.Core.BORDER_CONSTANT;
 import static org.opencv.core.CvType.*;
 
@@ -48,12 +46,31 @@ import static org.opencv.core.CvType.*;
 
 public class LayoutAnalyzer {
 
-    private static boolean _outputDebug = false;
-    private static boolean _outputFile = false;
-    private static int globalcounter = 0;
+    private static final Logger LOG = LoggerFactory.getLogger(LayoutAnalyzer.class);
+
+    private static final AtomicBoolean OUTPUT_DEBUG = new AtomicBoolean(false);
+    private static final AtomicBoolean OUTPUT_FILE = new AtomicBoolean(false);
+    private static final AtomicInteger GLOBAL_COUNTER = new AtomicInteger(0);
 
     static {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
+    }
+
+    /**
+     * Shared, XXE-hardened {@link TransformerFactory}. JAXP factory creation is expensive
+     * (classpath scan) and the factory is safe to share between threads.
+     */
+    private static final TransformerFactory SECURE_TRANSFORMER_FACTORY = buildSecureTransformerFactory();
+
+    private static TransformerFactory buildSecureTransformerFactory() {
+        TransformerFactory transformerFactory = TransformerFactory.newInstance();
+        transformerFactory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        transformerFactory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
+        return transformerFactory;
+    }
+
+    private static TransformerFactory createSecureTransformerFactory() {
+        return SECURE_TRANSFORMER_FACTORY;
     }
 
 
@@ -62,19 +79,19 @@ public class LayoutAnalyzer {
             DOMSource domSource = new DOMSource(document);
             StringWriter writer = new StringWriter();
             StreamResult result = new StreamResult(writer);
-            TransformerFactory tf = TransformerFactory.newInstance();
+            TransformerFactory tf = createSecureTransformerFactory();
             Transformer transformer = tf.newTransformer();
             transformer.transform(domSource, result);
             return writer.toString();
         } catch (TransformerException te) {
-            System.out.println(te.getMessage());
+            LOG.error("Could not serialize XML document", te);
         }
-        return "an error has occured";
+        return "an error has occurred";
     }
 
     private static void storeXML(Document document, String outputFile) {
         try {
-            Transformer tr = TransformerFactory.newInstance().newTransformer();
+            Transformer tr = createSecureTransformerFactory().newTransformer();
             tr.setOutputProperty(OutputKeys.INDENT, "yes");
             tr.setOutputProperty(OutputKeys.METHOD, "xml");
             tr.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
@@ -85,7 +102,7 @@ public class LayoutAnalyzer {
                     new StreamResult(new FileOutputStream(outputFile)));
 
         } catch (TransformerException | IOException ex) {
-            System.out.println(ex.getMessage());
+            LOG.error("Could not store XML to {}", outputFile, ex);
         }
     }
 
@@ -116,7 +133,7 @@ public class LayoutAnalyzer {
 
 
     private static DocumentPage determineInitialBlur(Mat inputImage, String uri, long start, DocumentPage documentPage) {
-        System.err.printf("Determining blur: %s%n", System.currentTimeMillis() - start);
+        LOG.debug("Determining blur: {}", System.currentTimeMillis() - start);
         int cocoCount = Integer.MAX_VALUE;
         int medianBlurSize;
         for (medianBlurSize = 1; medianBlurSize < 21; medianBlurSize += 2) {
@@ -134,9 +151,8 @@ public class LayoutAnalyzer {
             medianBlurred = OpenCVWrapper.release(medianBlurred);
         }
 
-        System.err.printf("Determined blur: %s%n", System.currentTimeMillis() - start);
-
-        System.out.println("medianBlur: " + medianBlurSize + " cocoCount: " + cocoCount);
+        LOG.debug("Determined blur: {}", System.currentTimeMillis() - start);
+        LOG.debug("medianBlur: {} cocoCount: {}", medianBlurSize, cocoCount);
 
         if (medianBlurSize > 1) {
             Imgproc.medianBlur(inputImage, inputImage, medianBlurSize);
@@ -197,7 +213,7 @@ public class LayoutAnalyzer {
                 VisualizationHelper.colorize(largeCoCoImage, coco);
             }
         }
-        if (_outputFile) {
+        if (OUTPUT_FILE.get()) {
             Imgcodecs.imwrite("/scratch/images/out-largeCoCoImage.png", largeCoCoImage);
         }
     }
@@ -227,9 +243,9 @@ public class LayoutAnalyzer {
                     VisualizationHelper.colorize(image, topCoCos);
                     VisualizationHelper.colorize(image, bottomCoCos);
                     Imgproc.line(image, new Point(coco.getX(), coco.getY()), new Point(coco.getX() + coco.getBitMap().getWidth(), coco.getY() + coco.getBitMap().getHeight()), new Scalar(255, 255, 255), 3);
-                    if (_outputFile) {
-                        globalcounter++;
-                        System.err.println("writing /scratch/images/out-clusterImage.png");
+                    if (OUTPUT_FILE.get()) {
+                        int globalcounter = GLOBAL_COUNTER.incrementAndGet();
+                        LOG.debug("writing /scratch/images/out-clusterImage.png");
                         Imgcodecs.imwrite("/scratch/images/out-clusterImage" + globalcounter + ".png", image);
                     }
                 }
@@ -258,9 +274,9 @@ public class LayoutAnalyzer {
                     VisualizationHelper.colorize(image, leftCoCos);
                     VisualizationHelper.colorize(image, rightCoCos);
                     Imgproc.line(image, new Point(coco.getX(), coco.getY()), new Point(coco.getX() + coco.getBitMap().getWidth(), coco.getY() + coco.getBitMap().getHeight()), new Scalar(255, 255, 255), 3);
-                    if (_outputFile) {
-                        globalcounter++;
-                        System.err.println("writing /scratch/images/out-clusterImage.png");
+                    if (OUTPUT_FILE.get()) {
+                        int globalcounter = GLOBAL_COUNTER.incrementAndGet();
+                        LOG.debug("writing /scratch/images/out-clusterImage.png");
                         Imgcodecs.imwrite("/scratch/images/out-clusterImage" + globalcounter + ".png", image);
                     }
                 }
@@ -277,7 +293,7 @@ public class LayoutAnalyzer {
 
         Core.addWeighted(horizontalImage, 0.5, verticalImage, 0.5, 0, combined, horizontalImage.depth());
 
-        if (_outputFile) {
+        if (OUTPUT_FILE.get()) {
             Imgcodecs.imwrite("/scratch/images/out-runlengthLinesImage.png", combined);
             Imgcodecs.imwrite("/scratch/images/out-runlengthLinesImageVertical.png", verticalImage);
             Imgcodecs.imwrite("/scratch/images/out-runlengthLinesImageHorizontal.png", horizontalImage);
@@ -292,7 +308,7 @@ public class LayoutAnalyzer {
             if (coco.getBitMap().getWidth() > image.width() / 10) {
                 if (coco.getBitMap().getHeight() < coco.getBitMap().getWidth() / 25) {
                     horizontalLines.add(coco);
-                    System.out.printf("%s %s %s %s%n", coco.getX(), coco.getY(), coco.getX() + coco.getBitMap().getWidth(), coco.getY() + coco.getBitMap().getHeight());
+                    LOG.debug("{} {} {} {}", coco.getX(), coco.getY(), coco.getX() + coco.getBitMap().getWidth(), coco.getY() + coco.getBitMap().getHeight());
                 }
             }
         }
@@ -317,9 +333,9 @@ public class LayoutAnalyzer {
 
     private static void getVerticalRunlengthHisto(Mat binaryImage) {
         Mat lines = new Mat();
-        System.out.println("starting hough");
+        LOG.debug("starting hough");
         Imgproc.HoughLinesP(binaryImage, lines, 1, Math.PI / 180, 10, 0, 0);
-        System.out.println("hough done");
+        LOG.debug("hough done");
 
         Mat linesImg = Mat.zeros(binaryImage.height(), binaryImage.width(), CV_32SC3);
 
@@ -334,7 +350,7 @@ public class LayoutAnalyzer {
 
             int length = (int) Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
 
-            System.out.printf("length: %s%n", length);
+            LOG.debug("length: {}", length);
             if (Math.abs(x1 - x2) / Math.abs(y1 - y2) < 0.1) {
                 Imgproc.line(linesImg, start, end, new Scalar(0, 255, 0), 3);
             } else if (Math.abs(y1 - y2) / Math.abs(x1 - x2) < 0.1) {
@@ -349,9 +365,9 @@ public class LayoutAnalyzer {
 
     private static void doHoughLines(Mat binaryImage) {
         Mat lines = new Mat();
-        System.out.println("starting hough");
+        LOG.debug("starting hough");
         Imgproc.HoughLinesP(binaryImage, lines, 1, Math.PI / 180, 10, binaryImage.width() / 10.0, 2);
-        System.out.println("hough done");
+        LOG.debug("hough done");
 
         Mat linesImg = Mat.zeros(binaryImage.height(), binaryImage.width(), CV_32SC3);
 
@@ -373,7 +389,7 @@ public class LayoutAnalyzer {
             }
 
         }
-        System.err.println("writing /scratch/images/out-houghLines.png");
+        LOG.debug("writing /scratch/images/out-houghLines.png");
         Imgcodecs.imwrite("/scratch/images/out-houghLines.png", linesImg);
         lines= OpenCVWrapper.release(lines);
         linesImg = OpenCVWrapper.release(linesImg);
@@ -510,7 +526,7 @@ public class LayoutAnalyzer {
 //        uri= "/data/98_1_Staten-Generaal_1626-1651/00 Vervolg RSG/Pilot OCR 1725/Afbeeldingen/1740/NL-HaNA_1.01.02_3795_0184.jpg";
 //      /  String md5 = Hash.getSHA512(uri);
 
-        Mat image = Imgcodecs.imread(uri);
+        Mat image = OpenCVWrapper.imread(uri, Imgcodecs.IMREAD_UNCHANGED);
 
         LayoutConfiguration configuration = new LayoutConfiguration(image);
         LayoutProc.setOutputDebug(false);
@@ -521,7 +537,7 @@ public class LayoutAnalyzer {
         ConnectedComponentProc coCoProc = new ConnectedComponentProc();
         DocumentPage documentPage = new DocumentPage(image, uri);
         java.util.List<ConnectedComponent> cocos = documentPage.getCocos();
-        System.out.println(cocos.size());
+        LOG.info("Connected components: {}", cocos.size());
 
 
         for (int i = 2; i < 100; i++) {
@@ -532,7 +548,7 @@ public class LayoutAnalyzer {
             cocos = coCoProc.process(binImage, false);
             LayoutProc.deSpeckle(binary, cocos, i);
             Imgcodecs.imwrite(String.format("/scratch/out%s.png", i), binary);
-            System.out.println(i + "     " + cocos.size());
+            LOG.info("{} {}", i, cocos.size());
             binary = OpenCVWrapper.release(binary);
             System.gc();
         }

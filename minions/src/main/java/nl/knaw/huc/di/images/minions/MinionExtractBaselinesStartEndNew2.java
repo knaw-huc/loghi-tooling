@@ -611,17 +611,20 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
         Mat submat = labeledStart.submat(rect);
 
         // Get the average offset of the y value
-        for (int counter = 0; counter < rect.height; counter++) {
-            int pixelValue = (int) submat.get(counter, submat.width() - 1)[0];
-            if (pixelValue == labelNumber) {
-                pixelCounter += counter;
-                totalPixelsOn++;
+        try {
+            for (int counter = 0; counter < rect.height; counter++) {
+                int pixelValue = (int) submat.get(counter, submat.width() - 1)[0];
+                if (pixelValue == labelNumber) {
+                    pixelCounter += counter;
+                    totalPixelsOn++;
+                }
             }
+        } finally {
+            submat.release();
         }
-        submat.release();
 
         // Start point selected based on the dilation and found offset (Seem like it would only work in one orientation)
-        Point startPoint = new Point(rect.x + dilationUsed, rect.y + (pixelCounter / totalPixelsOn));
+        Point startPoint = new Point(rect.x + dilationUsed, rect.y + (totalPixelsOn == 0 ? rect.height / 2 : (pixelCounter / totalPixelsOn)));
         return startPoint;
     }
 
@@ -636,17 +639,20 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
         Mat submat = labeledEnd.submat(rect);
 
         // Get the average offset of the y value
-        for (int counter = 0; counter < rect.height; counter++) {
-            int pixelValue = (int) submat.get(counter, 0)[0];
-            if (pixelValue == labelNumber) {
-                pixelCounter += counter;
-                totalPixelsOn++;
+        try {
+            for (int counter = 0; counter < rect.height; counter++) {
+                int pixelValue = (int) submat.get(counter, 0)[0];
+                if (pixelValue == labelNumber) {
+                    pixelCounter += counter;
+                    totalPixelsOn++;
+                }
             }
+        } finally {
+            submat.release();
         }
-        submat.release();
 
         // Start point selected based on the bounding box size and found offset
-        Point endPoint = new Point(rect.x + (rect.width / 2), rect.y + (pixelCounter / totalPixelsOn));
+        Point endPoint = new Point(rect.x + (rect.width / 2), rect.y + (totalPixelsOn == 0 ? rect.height / 2 : (pixelCounter / totalPixelsOn)));
         return endPoint;
     }
 
@@ -716,15 +722,15 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
         int max_size = -1;
         if (commandLine.hasOption("input_path_png")) {
             inputPathPng = commandLine.getOptionValue("input_path_png");
-            System.out.println("input_path_png: " + inputPathPng);
+            LOG.info("input_path_png: {}", inputPathPng);
         }
         if (commandLine.hasOption("input_path_pagexml")) {
             inputPathPageXml = commandLine.getOptionValue("input_path_pagexml");
-            System.out.println("input_path_pagexml: " + inputPathPageXml);
+            LOG.info("input_path_pagexml: {}", inputPathPageXml);
         }
         if (commandLine.hasOption("output_path_pagexml")) {
             outputPathPageXml = commandLine.getOptionValue("output_path_pagexml");
-            System.out.println("output_path_pagexml: " + outputPathPageXml);
+            LOG.info("output_path_pagexml: {}", outputPathPageXml);
         }
         if (commandLine.hasOption("as_single_region")) {
             asSingleRegion = true;
@@ -748,7 +754,7 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
         if (commandLine.hasOption("max_size")) {
             max_size = Integer.parseInt(commandLine.getOptionValue("max_size"));
         }
-        System.out.println("as_single_region: " + asSingleRegion);
+        LOG.info("as_single_region: {}", asSingleRegion);
         String namespace = commandLine.hasOption("use_2013_namespace") ? PageUtils.NAMESPACE2013: PageUtils.NAMESPACE2019;
 
         DirectoryStream<Path> fileStream = Files.newDirectoryStream(Paths.get(inputPathPng));
@@ -789,9 +795,15 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
             }
         }
         executor.shutdown();
-        while (!executor.isTerminated()) {
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.DAYS)) {
+                LOG.warn("Timed out waiting for baseline extraction workers to finish");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for baseline extraction workers", e);
         }
-        System.out.println("Finished all threads");
+        LOG.info("Finished all threads");
     }
 
 
@@ -800,9 +812,9 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
         try {
 //            extractAndMergeBaseLines(xmlFile, outputFile);
 //            System.out.println("starting: "+this.imageFile);
-            baseLineMat = Imgcodecs.imread(this.imageFile, Imgcodecs.IMREAD_GRAYSCALE);
-            baseLineMatStart = Imgcodecs.imread(imageFileStart, Imgcodecs.IMREAD_GRAYSCALE);
-            baseLineMatEnd = Imgcodecs.imread(imageFileEnd, Imgcodecs.IMREAD_GRAYSCALE);
+            baseLineMat = OpenCVWrapper.imread(this.imageFile, Imgcodecs.IMREAD_GRAYSCALE);
+            baseLineMatStart = OpenCVWrapper.imread(imageFileStart, Imgcodecs.IMREAD_GRAYSCALE);
+            baseLineMatEnd = OpenCVWrapper.imread(imageFileEnd, Imgcodecs.IMREAD_GRAYSCALE);
             thresHoldedBaselines = new Mat();
             thresHoldedBaselinesStart = new Mat();
             thresHoldedBaselinesEnd = new Mat();
@@ -841,12 +853,12 @@ public class MinionExtractBaselinesStartEndNew2 implements Runnable, AutoCloseab
 
             extractAndMergeBaseLinesNew(this.xmlFile, this.outputFile, this.margin, this.namespace);
         } catch (IOException | TransformerException e) {
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         } finally {
             try {
                 this.close();
             } catch (Exception e) {
-                e.printStackTrace();
+                LOG.error("Unexpected error", e);
             }
         }
     }

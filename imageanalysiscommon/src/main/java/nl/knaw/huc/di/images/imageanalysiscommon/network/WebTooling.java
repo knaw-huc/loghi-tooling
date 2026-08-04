@@ -25,7 +25,7 @@ public class WebTooling {
                 !remoteUri.endsWith(".tif")
         ) {
             remoteUri += "/full/full/0/default.jpg";
-            System.out.println("getting remote resource: " + remoteUri);
+            LOG.debug("getting remote resource: {}", remoteUri);
         }
 
         URL url = new URL(remoteUri);
@@ -90,8 +90,7 @@ public class WebTooling {
                     LOG.debug("returning imagefile");
                     return imageFile;
                 } catch (IOException e) {
-                    LOG.error("Failed while reading bytes from %s: %s%n", url.toExternalForm(), e.getMessage());
-                    e.printStackTrace();
+                    LOG.error("Failed while reading bytes from {}", url.toExternalForm(), e);
                     // Perform any other exception handling that's appropriate.
                 }
             } else {
@@ -106,16 +105,38 @@ public class WebTooling {
 
     }
 
+    /**
+     * Loads an image from a local path or remote URI.
+     * <p>
+     * <strong>Ownership:</strong> The returned {@link Mat} is owned by the
+     * caller. The caller <em>must</em> call {@link Mat#release()} (or
+     * preferably {@code OpenCVWrapper.release(...)} from the {@code
+     * layoutanalyzer} module) once the {@code Mat} is no longer needed.
+     * Failure to do so leaks native memory that the JVM garbage collector
+     * cannot reclaim.
+     * <p>
+     * The returned Mat may be {@link Mat#empty()} when OpenCV could not decode
+     * the file (e.g. corrupt or unsupported format). Callers should check.
+     *
+     * @see <a href="https://docs.opencv.org/4.x/d4/da8/group__imgcodecs.html">OpenCV imread documentation</a>
+     */
     public static Mat readImage(String uri, UUID uuid, boolean isIIIF) throws Exception {
-        LOG.debug("readImage: " + uri);
+        LOG.debug("readImage: {}", uri);
         if (uri.startsWith("http")) {
             return readRemoteImage(uri, uuid, false, isIIIF);
         }
         return Imgcodecs.imread(uri);
     }
 
+    /**
+     * Loads an image from a remote URI, optionally caching it on disk under
+     * {@code /scratch/preloaded/}.
+     * <p>
+     * <strong>Ownership:</strong> The returned {@link Mat} is owned by the
+     * caller and must be released with {@link Mat#release()}.
+     */
     public static Mat readRemoteImage(String uri, UUID uuid, boolean localOnly, boolean isIIIF) throws Exception {
-        LOG.debug("readRemoteImage: " + uri);
+        LOG.debug("readRemoteImage: {}", uri);
         int errorCount = 0;
         String baseDir = "/scratch/preloaded/";
         String targetFileWithoutExtension = null;
@@ -132,13 +153,13 @@ public class WebTooling {
             targetFileWithoutExtension = baseDir + uuid.toString();
             File jpgFile = new File(targetFileWithoutExtension + ".jpg");
             if (jpgFile.exists()) {
-                LOG.debug("reading preloaded image: " + targetFileWithoutExtension + ".jpg");
+                LOG.debug("reading preloaded image: {}.jpg", targetFileWithoutExtension);
                 return Imgcodecs.imread(jpgFile.getAbsolutePath());
             }
 
             File pngFile = new File(targetFileWithoutExtension + ".png");
             if (pngFile.exists()) {
-                LOG.debug("reading preloaded image: " + targetFileWithoutExtension + ".png");
+                LOG.debug("reading preloaded image: {}.png", targetFileWithoutExtension);
                 return Imgcodecs.imread(pngFile.getAbsolutePath());
             }
         }
@@ -161,7 +182,8 @@ public class WebTooling {
                 Mat image = Imgcodecs.imdecode(matOfByte, 1);
                 matOfByte.release();
                 if (image.width() == 0 || image.height() == 0) {
-                    LOG.error("image %s has zero height and/or width%n", uri);
+                    LOG.error("image {} has zero height and/or width", uri);
+                    image.release();
                     throw new Exception(String.format("image %s has zero height and/or width", uri));
                 }
                 if (new File(baseDir).exists() && targetFileWithoutExtension != null) {
@@ -173,7 +195,7 @@ public class WebTooling {
                 }
                 return image;
             } catch (Exception ex) {
-                ex.printStackTrace();
+                LOG.error("Failed to read remote image {}", uri, ex);
             }
         }
         throw new Exception("Too many errors");

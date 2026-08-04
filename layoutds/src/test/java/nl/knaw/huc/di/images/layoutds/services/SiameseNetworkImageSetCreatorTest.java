@@ -51,6 +51,18 @@ public class SiameseNetworkImageSetCreatorTest {
         createUser();
         createFromSet();
         createPimFields();
+        // Ensure pimField and datasetDefinition are persisted by re-fetching them
+        final PimFieldDefinitionDAO pimFieldDefinitionDAO = new PimFieldDefinitionDAO();
+        try (final Session session = SessionFactorySingleton.getSessionFactory().openSession()) {
+            Transaction transaction = session.beginTransaction();
+            pimField = pimFieldDefinitionDAO.getByUUID(session, pimField.getUuid());
+            datasetDefinition = pimFieldDefinitionDAO.getByUUID(session, datasetDefinition.getUuid());
+            // Force initialization of any lazy collections
+            if (pimField.getPossibleValues() != null) {
+                pimField.getPossibleValues().size();
+            }
+            transaction.commit();
+        }
     }
 
     @After

@@ -1,9 +1,12 @@
 package nl.knaw.huc.di.images.minions;
 
+
 import nl.knaw.huc.di.images.layoutds.models.Page.PcGts;
 import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -13,6 +16,7 @@ import java.util.stream.Collectors;
 public class MinionGarbageCharacterCalculator {
 
 
+    private static final Logger LOG = LoggerFactory.getLogger(MinionGarbageCharacterCalculator.class);
     private static Options getOptions() {
         final Options options = new Options();
         options.addOption(Option.builder("page_file").required().hasArg().desc("Page file to check on garbage characters").build());
@@ -51,14 +55,14 @@ public class MinionGarbageCharacterCalculator {
         try {
             page = PageUtils.readPageFromFile(Path.of(page_file_string));
         } catch (IOException e) {
-            System.err.println("Could not read page file: " + e.getMessage());
+            LOG.warn("Could not read page file: {}", e.getMessage());
             return;
         }
         final String characters;
         try {
             characters = StringTools.readFile(characters_file_string);
         } catch (IOException e) {
-            System.err.println("Could not read characters file: " + e.getMessage());
+            LOG.warn("Could not read characters file: {}", e.getMessage());
             return;
         }
 
@@ -76,8 +80,8 @@ public class MinionGarbageCharacterCalculator {
         }
 
         final int textLength = unicodeText.length();
-        System.out.println("total characters: " + textLength);
-        System.out.println("garbage characters: " + countNotAllowedCharacters);
-        System.out.println("garbage characters percentage: " + (countNotAllowedCharacters * 100 /  (textLength > 0 ? textLength : 1)));
+        LOG.info("total characters: {}", textLength);
+        LOG.info("garbage characters: {}", countNotAllowedCharacters);
+        LOG.info("garbage characters percentage: {}", (countNotAllowedCharacters * 100 / (textLength > 0 ? textLength : 1)));
     }
 }

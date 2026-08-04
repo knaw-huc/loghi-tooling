@@ -1,14 +1,13 @@
 package nl.knaw.huc.di.images.minions;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import nl.knaw.huc.di.images.imageanalysiscommon.UnicodeToAsciiTranslitirator;
 import nl.knaw.huc.di.images.layoutds.models.HTRConfig;
 import nl.knaw.huc.di.images.layoutds.models.Page.*;
-import nl.knaw.huc.di.images.layoutds.models.HTRConfig;
 import nl.knaw.huc.di.images.pagexmlutils.PageUtils;
 import nl.knaw.huc.di.images.stringtools.StringTools;
 import org.apache.commons.cli.*;
-import org.elasticsearch.common.Strings;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
@@ -26,7 +25,6 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 public class MinionPyLaiaMergePageXML extends BaseMinion implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(MinionPyLaiaMergePageXML.class);
@@ -187,9 +185,8 @@ public class MinionPyLaiaMergePageXML extends BaseMinion implements Runnable {
 
 
         executor.shutdown();
-        while (!executor.isTerminated()) {
-        }
-        System.out.println("Finished all threads");
+
+        LOG.info("Finished all threads");
     }
 
     private static void readDictionary(String resultsFile) throws IOException {
@@ -251,7 +248,7 @@ public class MinionPyLaiaMergePageXML extends BaseMinion implements Runnable {
         try {
             this.runFile(this.file);
         } catch (IOException | TransformerException e) {
-            e.printStackTrace();
+            LOG.error("Unexpected error", e);
         }
     }
 }

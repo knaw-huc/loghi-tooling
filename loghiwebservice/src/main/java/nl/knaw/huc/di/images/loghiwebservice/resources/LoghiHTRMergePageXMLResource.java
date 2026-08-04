@@ -40,6 +40,12 @@ import javax.annotation.security.PermitAll;
 public class LoghiHTRMergePageXMLResource extends LoghiWebserviceResource {
 
     public static final Logger LOG = LoggerFactory.getLogger(LoghiHTRMergePageXMLResource.class);
+    /**
+     * Shared, thread-safe Jackson {@link ObjectMapper}.
+     * Re-using a single instance avoids the expensive per-request reflective
+     * initialisation that the constructor performs (see SMELL-06 / EXT-SEC-03).
+     */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private final String uploadLocation;
     private final ExecutorService executorService;
     private final Supplier<String> queueUsageStatusSupplier;
@@ -211,8 +217,8 @@ public class LoghiHTRMergePageXMLResource extends LoghiWebserviceResource {
             }
         }
 
-        // Initialize Jackson's ObjectMapper outside the loop for efficiency
-        ObjectMapper mapper = new ObjectMapper();
+        // Re-use the shared, thread-safe ObjectMapper instance for efficiency
+        ObjectMapper mapper = MAPPER;
         Map<String, Integer> metadataIndexMap = new HashMap<>();
         int index = 0;
 
@@ -281,7 +287,7 @@ public class LoghiHTRMergePageXMLResource extends LoghiWebserviceResource {
             try {
                 confidence = Double.parseDouble(splitted[2]);
             } catch (Exception ex) {
-                ex.printStackTrace();
+                LOG.error("Unexpected error", ex);
                 LOG.error(filename + ex.getMessage());
             }
             if (splitted.length > 3) { // Check if pred_text is not empty
