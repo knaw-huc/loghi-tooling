@@ -23,6 +23,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class MergeBenchmark {
@@ -175,7 +176,7 @@ public class MergeBenchmark {
             List<Path> txtFiles = stream
                     .filter(p -> p.getFileName().toString().endsWith(".txt"))
                     .sorted()
-                    .toList();
+                    .collect(Collectors.toList());
             for (Path txt : txtFiles) {
                 String filename = txt.getFileName().toString();
                 String key = filename.substring(0, filename.length() - ".txt".length());
