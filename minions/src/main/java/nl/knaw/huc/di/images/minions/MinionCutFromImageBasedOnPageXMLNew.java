@@ -167,6 +167,12 @@ public class MinionCutFromImageBasedOnPageXMLNew extends BaseMinion implements R
         if (this.tmpdir == null) {
             this.tmpdir = System.getProperty("java.io.tmpdir");
             new File(this.tmpdir).mkdirs();
+        }else{
+            if (!new File(this.tmpdir).exists()) {
+                if (!new File(this.tmpdir).mkdirs()){
+                    LOG.error("tmpdir does not exist and could not be created: " + this.tmpdir);
+                }
+            }
         }
         this.minimumBaselineThickness =minimumBaselineThickness;
         this.coffeeStains = coffeeStains;
