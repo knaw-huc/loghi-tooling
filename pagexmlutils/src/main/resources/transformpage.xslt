@@ -72,6 +72,7 @@
     <xsl:template match="page:OrderedGroupType/@type"/>
     <xsl:template match="page:UnorderedGroupType/@type"/>
     <xsl:template match="page:TextStyle/@textColourRgb"/>
+    <xsl:template match="page:TextStyle/@xHeight"/>
 
 
     <!-- 2018-07-15 -->
