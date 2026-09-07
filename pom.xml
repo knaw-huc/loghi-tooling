@@ -13,10 +13,10 @@
              1.0-SNAPSHOT artifacts are resolved from the in-project file repository
              (file:///${user.home}/repo) instead. Re-enable (and remove the seeded repo)
              when building with a full prima-core-libs checkout. -->
-        <!-- <module>../prima-core-libs/java/PrimaMaths/</module>
+        <module>../prima-core-libs/java/PrimaMaths/</module>
         <module>../prima-core-libs/java/PrimaBasic/</module>
         <module>../prima-core-libs/java/PrimaIo/</module>
-        <module>../prima-core-libs/java/PrimaDla/</module> -->
+        <module>../prima-core-libs/java/PrimaDla/</module>
         <module>stringtools</module>
         <module>altoxmlutils</module>
         <module>pagexmlutils</module>
