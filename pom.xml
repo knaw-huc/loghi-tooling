@@ -8,10 +8,15 @@
     <artifactId>loghi-tooling</artifactId>
     <version>2.1.0</version>
     <modules>
-        <module>../prima-core-libs/java/PrimaMaths/</module>
+        <!-- NB (prompt-dependency-audit-2026-09-06): the prima-core-libs sibling checkout is
+             not present in this environment, so these 4 modules are disabled and the Prima
+             1.0-SNAPSHOT artifacts are resolved from the in-project file repository
+             (file:///${user.home}/repo) instead. Re-enable (and remove the seeded repo)
+             when building with a full prima-core-libs checkout. -->
+        <!-- <module>../prima-core-libs/java/PrimaMaths/</module>
         <module>../prima-core-libs/java/PrimaBasic/</module>
         <module>../prima-core-libs/java/PrimaIo/</module>
-        <module>../prima-core-libs/java/PrimaDla/</module>
+        <module>../prima-core-libs/java/PrimaDla/</module> -->
         <module>stringtools</module>
         <module>altoxmlutils</module>
         <module>pagexmlutils</module>
@@ -59,15 +64,21 @@
         </plugins>
     </build>
     <properties>
-        <jackson.version>2.16.1</jackson.version>
-        <joda-time.version>2.12.5</joda-time.version>
-        <commons-io.version>[2.14.0,)</commons-io.version>
-        <commons-lang3.version>3.14.0</commons-lang3.version>
-        <guava.version>32.1.1-jre</guava.version>
+        <!-- 2026-09-06 dependency audit: jackson bumped 2.16.1 -> 2.22.2 (CVE-2026-59888,
+             CVE-2026-54512/13/14 fixed in 2.18.8; CVE-2026-18401 fixed in 2.18.8),
+             commons-lang3 3.14.0 -> 3.20.0 (CVE-2025-48924 fixed in 3.18.0),
+             log4j 2.26.0 -> 2.26.1 (CVE-2026-49844 fixed in 2.26.1),
+             guava 32.1.1-jre -> 33.7.1-jre, junit5 5.9.1 -> 5.14.4,
+             commons-io pinned [2.14.0,) -> 2.22.0, unused joda-time.version removed.
+             See DEPS-TODO-2026-09-06.md for deferred upgrades. -->
+        <jackson.version>2.22.2</jackson.version>
+        <commons-io.version>2.22.0</commons-io.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
+        <guava.version>33.7.1-jre</guava.version>
         <slf4j.version>1.7.36</slf4j.version>
-        <log4j.version>2.26.0</log4j.version>
+        <log4j.version>2.26.1</log4j.version>
         <junit4.version>4.13.2</junit4.version>
-        <junit5.version>5.9.1</junit5.version>
+        <junit5.version>5.14.4</junit5.version>
         <hibernate.version>5.6.15.Final</hibernate.version>
     </properties>
 

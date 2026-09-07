@@ -40,7 +40,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-csv</artifactId>
-            <version>1.10.0</version>
+            <version>1.14.1</version>
         </dependency>
         <dependency>
             <groupId>nl.knaw.huc.di.images</groupId>
@@ -53,12 +53,7 @@
             <artifactId>layoutds</artifactId>
             <version>${loghi-tooling.version}</version>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/com.drewnoakes/metadata-extractor -->
-        <dependency>
-            <groupId>com.drewnoakes</groupId>
-            <artifactId>metadata-extractor</artifactId>
-            <version>2.18.0</version>
-        </dependency>
+        <!-- 2026-09-06 audit: metadata-extractor 2.18.0 removed (unused; no code references). -->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
@@ -71,18 +66,22 @@
         <dependency>
             <groupId>commons-io</groupId>
             <artifactId>commons-io</artifactId>
-            <version>[2.14.0,)</version>
         </dependency>
         <dependency>
             <groupId>net.gcardone.junidecode</groupId>
             <artifactId>junidecode</artifactId>
-            <version>0.4.1</version>
+            <version>0.5.2</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <scope>test</scope>
         </dependency>
-
+        <dependency>
+            <groupId>com.drewnoakes</groupId>
+            <artifactId>metadata-extractor</artifactId>
+            <version>2.21.0</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 </project>

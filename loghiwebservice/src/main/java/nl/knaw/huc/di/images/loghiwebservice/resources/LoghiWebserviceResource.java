@@ -1,13 +1,13 @@
 package nl.knaw.huc.di.images.loghiwebservice.resources;
 
 import com.codahale.metrics.annotation.Timed;
+import jakarta.annotation.security.PermitAll;
 import org.json.simple.JSONObject;
 
-import javax.annotation.security.PermitAll;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.core.Response;
 import java.util.TreeMap;
 import java.util.concurrent.Future;
 

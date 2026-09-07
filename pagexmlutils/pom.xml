@@ -23,9 +23,6 @@
             </plugin>
         </plugins>
     </build>
-    <properties>
-        <jackson.version>2.16.1</jackson.version>
-    </properties>
     <dependencies>
         <!-- Dependencies updated 2020-11-13 -->
         <dependency>
@@ -97,12 +94,6 @@
             <artifactId>hamcrest-all</artifactId>
             <version>1.3</version>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>nl.knaw.huc.di.images</groupId>
-            <artifactId>PrimaDla</artifactId>
-            <version>1.0-SNAPSHOT</version>
-            <scope>compile</scope>
         </dependency>
 
     </dependencies>

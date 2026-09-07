@@ -24,7 +24,6 @@
         </plugins>
     </build>
     <properties>
-        <jackson.version>2.16.1</jackson.version>
         <hibernate.version>5.6.15.Final</hibernate.version>
         <opencv.version>4.12.0</opencv.version>
     </properties>
@@ -34,22 +33,11 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
         </dependency>
-        <dependency>
-            <groupId>jmagick</groupId>
-            <artifactId>jmagick</artifactId>
-            <version>6.6.9</version>
-        </dependency>
-        <!-- https://mvnrepository.com/artifact/org.im4java/im4java -->
-        <dependency>
-            <groupId>org.im4java</groupId>
-            <artifactId>im4java</artifactId>
-            <version>1.4.0</version>
-        </dependency>
+        <!-- 2026-09-06 audit: jmagick 6.6.9 and im4java 1.4.0 removed (unused; no code references). -->
         <!-- https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-core -->
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
-            <version>2.26.0</version>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -58,7 +46,7 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <version>42.7.11</version>
+            <version>42.7.13</version>
         </dependency>
         <dependency>
             <groupId>org.hibernate</groupId>
@@ -105,12 +93,12 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-test</artifactId>
-            <version>5.3.29</version>
+            <version>5.3.39</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-jpa</artifactId>
-            <version>2.7.14</version>
+            <version>2.7.18</version>
         </dependency>
         <!-- Test dependencies -->
         <!-- DEP-06 NOTE: H2 1.4.200 has known CVEs (CVE-2021-23463, CVE-2021-42392,

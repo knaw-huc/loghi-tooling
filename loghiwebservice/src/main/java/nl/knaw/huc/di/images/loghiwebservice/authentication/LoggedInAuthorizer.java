@@ -3,7 +3,7 @@ package nl.knaw.huc.di.images.loghiwebservice.authentication;
 import io.dropwizard.auth.Authorizer;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import javax.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.container.ContainerRequestContext;
 
 public class LoggedInAuthorizer implements Authorizer<User> {
     public LoggedInAuthorizer() {
